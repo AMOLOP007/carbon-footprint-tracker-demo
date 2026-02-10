@@ -1,0 +1,95 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 
+  Aetherra Theme 
+  Primary: Deep Teal + Emerald
+  Secondary: Charcoal + Off-white
+  Accent: Electric Cyan + Muted Lime
+*/
+
+@layer base {
+  :root {
+    --background: 180 20% 98%; /* Light Teal-ish White */
+    --foreground: 180 40% 10%; /* Dark Teal Text */
+
+    --card: 0 0% 100%;
+    --card-foreground: 180 40% 10%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 180 40% 10%;
+
+    --primary: 175 60% 35%; /* Deep Teal */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 150 40% 90%; /* Soft Greenish White */
+    --secondary-foreground: 175 60% 25%;
+
+    --muted: 180 10% 94%;
+    --muted-foreground: 180 20% 40%;
+
+    --accent: 170 70% 40%; /* Emerald */
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 180 10% 90%;
+    --input: 180 10% 90%;
+    --ring: 175 60% 35%;
+
+    --radius: 0.75rem;
+
+    --font-inter: "Inter", sans-serif;
+    --font-outfit: "Outfit", sans-serif;
+  }
+
+  .dark {
+    --background: 220 30% 8%; /* Deep Charcoal */
+    --foreground: 180 20% 94%;
+
+    --card: 220 30% 11%;
+    --card-foreground: 180 20% 94%;
+
+    --popover: 220 30% 11%;
+    --popover-foreground: 180 20% 94%;
+
+    --primary: 170 80% 50%; /* Electric Emerald/Cyan */
+    --primary-foreground: 220 30% 8%;
+
+    --secondary: 215 30% 18%; /* Darker Blue-Grey */
+    --secondary-foreground: 180 20% 94%;
+
+    --muted: 220 30% 15%;
+    --muted-foreground: 215 20% 65%;
+
+    --accent: 160 84% 39%; /* Vibrant Green */
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 220 30% 18%;
+    --input: 220 30% 18%;
+    --ring: 170 80% 50%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* Glassmorphism Utilities */
+.glass {
+  @apply bg-opacity-70 backdrop-blur-md border border-white/20 shadow-lg;
+}
+
+.glass-dark {
+  @apply bg-black/40 backdrop-blur-md border border-white/10 shadow-lg;
+}
