@@ -1,21 +1,27 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
-import { Menu, LayoutDashboard, Calculator, User, Settings, LogOut, Sparkles, PieChart } from "lucide-react";
+import { Menu, LayoutDashboard, Calculator, User, Settings, LogOut, Sparkles, PieChart, Target, Lightbulb, Activity, Database, Users, Info } from "lucide-react";
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { Logo } from "@/components/logo";
 
 const sidebarItems = [
-    { name: "Dashboard", href: "/", icon: LayoutDashboard },
+    { name: "Overview", href: "/overview", icon: LayoutDashboard },
     { name: "Emissions Calculator", href: "/calculator", icon: Calculator },
     { name: "Reports & Analytics", href: "/reports", icon: PieChart },
     { name: "AI Assistant", href: "/ai-assistant", icon: Sparkles },
+    { name: "Goals & Targets", href: "/goals", icon: Target },
+    { name: "Insights & Recommendations", href: "/insights", icon: Lightbulb },
+    { name: "Activity Log", href: "/activity", icon: Activity },
+    { name: "Data Management", href: "/data", icon: Database },
+    { name: "Team / Organization", href: "/team", icon: Users },
+    { name: "About Aetherra", href: "/about", icon: Info },
     { name: "Settings", href: "/settings", icon: Settings },
 ];
 
@@ -23,15 +29,25 @@ interface SidebarProps extends React.HTMLAttributes<HTMLDivElement> { }
 
 export function Sidebar({ className }: SidebarProps) {
     const pathname = usePathname();
+    const router = useRouter();
 
-    const handleLogout = () => {
-        // Clear cookie
-        document.cookie = "token=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT;";
-        window.location.href = "/login";
+    const handleLogout = async () => {
+        try {
+            await fetch("/api/logout", { method: "POST" });
+            // Clear local storage
+            if (typeof window !== 'undefined') {
+                localStorage.clear();
+                sessionStorage.clear();
+            }
+            router.push("/login");
+        } catch (error) {
+            console.error("Logout error:", error);
+            router.push("/login");
+        }
     };
 
     return (
-        <div className={cn("pb-12 h-screen border-r bg-card hidden lg:block w-64 fixed left-0 top-0 z-50", className)}>
+        <div className={cn("pb-12 h-screen border-r bg-card hidden lg:block w-[280px] fixed left-0 top-0 z-50", className)}>
             <div className="space-y-4 py-4">
                 <div className="px-3 py-2">
                     <Link href="/" className="flex items-center px-4 mb-6 hover:opacity-80 transition-opacity">

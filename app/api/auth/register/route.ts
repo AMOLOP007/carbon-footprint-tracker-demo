@@ -1,62 +1,51 @@
 import { NextResponse } from "next/server";
-import connectToDatabase from "@/lib/db";
+import { connectToDB } from "@/lib/db";
 import User from "@/models/User";
 import bcrypt from "bcryptjs";
-import { signToken } from "@/lib/auth";
-import mongoose from "mongoose"; // Added mongoose import for connection.readyState
 
 export async function POST(req: Request) {
     try {
-        await connectToDatabase();
+        await connectToDB();
 
-        const { name, email, password, company, role } = await req.json(); // Moved req.json() parsing up
+        const { name, email, password } = await req.json();
 
-        // Check if we can proceed without DB (Mock mode if DB fails)
-        if (!mongoose.connection.readyState) {
-            // Mock success for demo purposes if DB is down - allowing user to "register" and get a token immediately
-            console.log("Mock Registration:", { name, email, company, role });
-            const mockToken = signToken({ id: "mock-id-" + Date.now(), email });
-            return NextResponse.json({
-                success: true,
-                token: mockToken,
-                user: { id: "mock-id", name, email, company, role }
-            });
+        // 1. Strict Input Validation
+        if (!name || !name.trim()) {
+            return NextResponse.json({ message: "Name is required" }, { status: 400 });
+        }
+        if (!email || !email.includes("@")) {
+            return NextResponse.json({ message: "Valid email is required" }, { status: 400 });
+        }
+        if (!password || password.length < 8) {
+            return NextResponse.json({ message: "Password must be at least 8 characters" }, { status: 400 });
         }
 
-        if (!name || !email || !password) {
-            return NextResponse.json({ message: "Missing required fields" }, { status: 400 });
-        }
-
-        const existingUser = await User.findOne({ email });
+        // 2. Check for existing user
+        const existingUser = await User.findOne({ email: email.toLowerCase() });
         if (existingUser) {
-            return NextResponse.json({ message: "User already exists" }, { status: 400 });
+            return NextResponse.json({ message: "User already exists with this email" }, { status: 400 });
         }
 
-        const hashedPassword = await bcrypt.hash(password, 10);
+        // 3. Hash Password
+        const hashedPassword = await bcrypt.hash(password, 12);
 
-        const user = await User.create({
-            name,
-            email,
+        // 4. Create User
+        await User.create({
+            name: name.trim(),
+            email: email.toLowerCase(),
             password: hashedPassword,
-            company,
-            role,
+            provider: "credentials",
+            role: "user"
         });
 
-        const token = signToken({ id: user._id, email: user.email });
-
+        // 5. Return success (No token, Require login)
         return NextResponse.json({
             success: true,
-            token,
-            user: {
-                id: user._id,
-                name: user.name,
-                email: user.email,
-                company: user.company,
-                role: user.role,
-            },
-        });
-    } catch (error) {
-        console.error("Registration error:", error);
+            message: "Registration successful. Please log in."
+        }, { status: 201 });
+
+    } catch (error: any) {
+        console.error("Registration critical error:", error);
         return NextResponse.json({ message: "Internal server error" }, { status: 500 });
     }
 }

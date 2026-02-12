@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { connectToDB } from "@/lib/db";
 import Calculation from "@/models/Calculation";
-import { verifyJWT } from "@/lib/auth"; // Need to ensure this exists or create it
+import { verifyJWT } from "@/lib/auth";
 import { cookies } from "next/headers";
-
-// Mock User ID getter if auth not fully wired
-import { getServerSession } from "next-auth"; // Import NextAuth session
+import { getServerSession } from "next-auth";
 import { authOptions } from "../auth/[...nextauth]/route";
+import { cache } from "@/lib/cache";
+
 
 // Mock User ID getter if auth not fully wired
 async function getUserId() {
@@ -44,46 +44,122 @@ async function getUserId() {
 
 export async function POST(req: Request) {
     try {
-        const mongoose = await connectToDB();
-
-        if (!mongoose) {
-            return NextResponse.json({ error: "Database connection failed" }, { status: 503 });
-        }
+        // Ensure DB connection is established with proper await
+        await connectToDB();
 
         const userId = await getUserId();
 
         if (!userId) {
-            return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+            return NextResponse.json({
+                error: "Please log in to save calculations."
+            }, { status: 401 });
         }
 
         const body = await req.json();
         const { type, inputs, emissions } = body;
 
-        // Ensure we don't start a DB op if not ready
-        if (mongoose.connection.readyState !== 1) {
-            // Wait up to 2 seconds for connection to be ready
-            for (let i = 0; i < 5; i++) {
-                await new Promise(resolve => setTimeout(resolve, 400));
-                if (mongoose.connection.readyState === 1) break;
-            }
-
-            // Final check
-            if (mongoose.connection.readyState !== 1) {
-                return NextResponse.json({ error: "Database not ready" }, { status: 503 });
-            }
+        // Validate required fields
+        if (!type) {
+            console.error('[SAVE API] ✗ ERROR: Type missing');
+            return NextResponse.json({
+                error: "Calculation type is required."
+            }, { status: 400 });
         }
 
-        // Save new calculation with explicit await
+        if (!inputs || typeof inputs !== 'object') {
+            console.error('[SAVE API] ✗ ERROR: Inputs missing or invalid:', inputs);
+            return NextResponse.json({
+                error: "Calculation inputs are required."
+            }, { status: 400 });
+        }
+
+        if (typeof emissions !== 'number' || emissions < 0) {
+            console.error('[SAVE API] ✗ ERROR: Invalid emissions value:', emissions, 'Type:', typeof emissions);
+            return NextResponse.json({
+                error: "Valid emissions value is required."
+            }, { status: 400 });
+        }
+        console.log('[SAVE API] ✓ All validations passed');
+
+        // Validate type enum against Calculation model - ACCEPT BOTH supply and supply_chain
+        const validTypes = ["electricity", "vehicle", "shipping", "supply", "supply_chain"];
+        if (!validTypes.includes(type)) {
+            console.error('[SAVE ERROR] Invalid type:', type, 'Valid types:', validTypes);
+            return NextResponse.json({
+                error: `Invalid calculation type "${type}". Must be one of: ${validTypes.join(", ")}.`
+            }, { status: 400 });
+        }
+
+        // Normalize 'supply' to 'supply_chain' for database consistency
+        const normalizedType = type === 'supply' ? 'supply_chain' : type;
+
+        // Save to database
         const calculation = await Calculation.create({
             userId,
-            type, // Enum validation happens here
+            type: normalizedType,
             inputs,
-            emissions
+            emissions,
         });
 
-        return NextResponse.json({ success: true, calculation });
+        // Validations passed
+        if (!userId) {
+            return NextResponse.json({ message: "User ID not found" }, { status: 401 });
+        }
+
+        // Log activity
+        const { logActivity } = await import("@/lib/activity/tracker");
+        logActivity({
+            userId: userId.toString(),
+            action: `Created ${type} calculation`,
+            category: "calculation",
+            metadata: {
+                calculationId: calculation._id.toString(),
+                emissions,
+            },
+        }).catch(() => { });
+
+        return NextResponse.json(
+            {
+                success: true,
+                calculation,
+                message: "Calculation saved successfully!",
+                refreshDashboard: true
+            },
+            { status: 201 }
+        );
     } catch (error: any) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        console.error("==========================================");
+        console.error("[SAVE API] ❌ CRITICAL ERROR CAUGHT");
+        console.error("Error name:", error.name);
+        console.error("Error message:", error.message);
+        console.error("Error code:", error.code);
+        console.error("Error stack:", error.stack);
+        console.error("Full error object:", JSON.stringify(error, null, 2));
+        console.error("==========================================");
+
+        // Handle Mongoose validation errors
+        if (error.name === 'ValidationError') {
+            const messages = Object.values(error.errors).map((err: any) => err.message);
+            console.error('[SAVE API] Validation errors:', messages);
+            return NextResponse.json({
+                error: `Validation error: ${messages.join(', ')}`
+            }, { status: 400 });
+        }
+
+        // Handle duplicate key errors
+        if (error.code === 11000) {
+            console.error('[SAVE API] Duplicate key error');
+            return NextResponse.json({
+                error: "This calculation already exists."
+            }, { status: 409 });
+        }
+
+        // Return detailed error for debugging
+        return NextResponse.json({
+            error: "Failed to save calculation. Please try again.",
+            details: error.message,
+            errorType: error.name
+        }, { status: 500 });
     }
 }
 

@@ -7,15 +7,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { Zap, Car, Truck, Factory, Save, ArrowRight, Loader2, Info, RefreshCcw, Bike, Download } from "lucide-react";
+import { Zap, Car, Truck, Factory, Save, ArrowRight, Loader2, Info, RefreshCcw, Bike, Download, FileText } from "lucide-react";
 import { generateReportPDF } from "@/lib/pdf-generator";
-
-// ... (existing code)
-
-
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
 export default function CalculatorPage() {
+    const router = useRouter();
     const [loading, setLoading] = useState(false);
 
     // State for each module
@@ -113,14 +111,14 @@ export default function CalculatorPage() {
     }, [supply]);
 
 
-    const handleDownload = (type: "electricity" | "vehicle" | "shipping" | "supply") => {
+    const handleDownload = async (type: "electricity" | "vehicle" | "shipping" | "supply") => {
         const emissions = results[type];
         if (emissions === 0) {
             toast.error("Calculate emissions before downloading.");
             return;
         }
 
-        generateReportPDF({
+        const reportData = {
             title: `${type.charAt(0).toUpperCase() + type.slice(1)} Emissions Report`,
             summary: `Instant report for ${type} emissions calculation.`,
             dataSnapshot: {
@@ -132,11 +130,31 @@ export default function CalculatorPage() {
                     emissions: emissions
                 }]
             }
-        });
-        toast.success("Report downloaded!");
+        };
+
+        // Generate PDF locally
+        generateReportPDF(reportData);
+        toast.success("Download started.");
+
+        // Save to Reports & Analytics
+        try {
+            const res = await fetch("/api/reports", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ customReportData: reportData }),
+            });
+
+            if (res.ok) {
+                toast.success("Report saved to Reports & Analytics");
+            } else {
+                console.error("Failed to save report to dashboard");
+            }
+        } catch (error) {
+            console.error("Error saving report:", error);
+        }
     };
 
-    const handleSave = async (type: "electricity" | "vehicle" | "shipping" | "supply") => {
+    const handleSave = async (type: "electricity" | "vehicle" | "shipping" | "supply", shouldRedirect = false) => {
         setLoading(true);
         const emissions = results[type];
 
@@ -147,272 +165,320 @@ export default function CalculatorPage() {
         else if (type === "supply") inputs = supply;
 
         try {
+            console.log('[SAVE] Starting save for type:', type, 'emissions:', emissions);
             const res = await fetch("/api/calculator", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ type, inputs, emissions }),
             });
 
+            console.log('[SAVE] Response status:', res.status, res.statusText);
+            const data = await res.json().catch(() => ({}));
+
             if (res.ok) {
-                toast.success("Calculation saved to dashboard!");
+                toast.success("Calculation saved!");
+
+                // Also trigger report generation if redirecting
+                if (shouldRedirect) {
+                    try {
+                        const reportData = {
+                            title: `${type.charAt(0).toUpperCase() + type.slice(1)} Emissions Report`,
+                            summary: `Generated from your recent ${type} calculation.`,
+                            dataSnapshot: {
+                                totalEmissions: emissions,
+                                byType: { [type]: emissions },
+                                recentCalcs: [{
+                                    createdAt: new Date(),
+                                    type: type,
+                                    emissions: emissions
+                                }]
+                            }
+                        };
+
+                        const reportRes = await fetch("/api/reports", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ customReportData: reportData }),
+                        });
+
+                        if (!reportRes.ok) {
+                            const errData = await reportRes.json().catch(() => ({}));
+                            console.error("Report generation failed:", errData);
+                            throw new Error(errData.error || "Failed to generate report");
+                        }
+
+                        toast.success("Redirecting to reports...");
+                        router.push("/reports");
+                    } catch (err: any) {
+                        console.error("Redirect Error:", err);
+                        toast.error(`Saved, but report generation failed: ${err.message}`);
+                    }
+                }
             } else {
-                const data = await res.json().catch(() => ({}));
-                toast.error(data.error || "Failed to save calculation.");
+                console.error('[SAVE] ERROR:', data.error || data.message || 'Unknown error');
+                toast.error(data.error || data.message || "Failed to save calculation.");
             }
         } catch (error) {
-            console.error(error);
-            toast.error("An error occurred. Check console.");
+            console.error('[SAVE] EXCEPTION:', error);
+            toast.error("Network error. Check console for details.");
         } finally {
             setLoading(false);
         }
     };
 
     return (
-        <div className="container mx-auto max-w-5xl space-y-8 pb-20">
+        <div className="container mx-auto max-w-3xl space-y-8 pb-20">
             <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
+                className="text-center mb-10"
             >
-                <h1 className="text-3xl font-bold font-heading mb-2">Carbon Calculator</h1>
-                <p className="text-muted-foreground">Real-time precision estimation across all scopes.</p>
+                <h1 className="text-4xl font-bold font-heading mb-2 bg-gradient-to-r from-green-400 to-emerald-600 bg-clip-text text-transparent">Carbon Calculator</h1>
+                <p className="text-muted-foreground text-lg">Real-time precision estimation across all scopes.</p>
             </motion.div>
 
-            <Tabs defaultValue="shipping" className="w-full">
-                <TabsList className="grid w-full grid-cols-4 lg:w-[600px] mb-6">
-                    <TabsTrigger value="electricity" className="gap-2"><Zap className="h-4 w-4" /> Power</TabsTrigger>
-                    <TabsTrigger value="vehicle" className="gap-2"><Car className="h-4 w-4" /> Fleet</TabsTrigger>
-                    <TabsTrigger value="shipping" className="gap-2"><Truck className="h-4 w-4" /> Logistics</TabsTrigger>
-                    <TabsTrigger value="supply" className="gap-2"><Factory className="h-4 w-4" /> Supply</TabsTrigger>
-                </TabsList>
+            <div className="w-full">
+                <Tabs defaultValue="shipping" className="w-full">
+                    <TabsList className="grid w-full grid-cols-4 mb-6 bg-black/40 p-1 rounded-xl">
+                        <TabsTrigger value="electricity" className="gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"><Zap className="h-4 w-4" /> Power</TabsTrigger>
+                        <TabsTrigger value="vehicle" className="gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"><Car className="h-4 w-4" /> Fleet</TabsTrigger>
+                        <TabsTrigger value="shipping" className="gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"><Truck className="h-4 w-4" /> Logistics</TabsTrigger>
+                        <TabsTrigger value="supply" className="gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"><Factory className="h-4 w-4" /> Supply</TabsTrigger>
+                    </TabsList>
 
-                <TabsContent value="electricity">
-                    <CalculatorCard
-                        title="Electricity Consumption"
-                        description="Scope 2: Indirect emissions from purchased energy."
-                        result={results.electricity}
-                        onSave={() => handleSave("electricity")}
-                        onDownload={() => handleDownload("electricity")}
-                        loading={loading}
-                        valid={!!electricity.kwh}
-                    >
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div className="space-y-2">
-                                <Label>Monthly Consumption (kWh)</Label>
-                                <Input
-                                    type="number"
-                                    placeholder="e.g. 5000"
-                                    value={electricity.kwh}
-                                    onChange={(e) => setElectricity({ ...electricity, kwh: e.target.value })}
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <Label>Energy Source</Label>
-                                <select
-                                    className="flex h-10 w-full rounded-md border border-white/20 bg-black text-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-500 focus-visible:ring-offset-2 hover:bg-green-700 transition-colors cursor-pointer"
-                                    value={electricity.source}
-                                    onChange={(e) => setElectricity({ ...electricity, source: e.target.value })}
-                                >
-                                    <option className="bg-black text-white" value="grid">Grid Mix (Standard)</option>
-                                    <option className="bg-black text-white" value="solar">Solar (100% Renewable)</option>
-                                    <option className="bg-black text-white" value="wind">Wind (100% Renewable)</option>
-                                    <option className="bg-black text-white" value="hybrid">Hybrid (50/50 Mix)</option>
-                                </select>
-                            </div>
-                        </div>
-                    </CalculatorCard>
-                </TabsContent>
-
-                <TabsContent value="vehicle">
-                    <CalculatorCard
-                        title="Vehicle Fleet & Travel"
-                        description="Scope 1: Direct emissions calculated via efficiency and fuel chemistry."
-                        result={results.vehicle}
-                        onSave={() => handleSave("vehicle")}
-                        onDownload={() => handleDownload("vehicle")}
-                        loading={loading}
-                        valid={!!vehicle.distance}
-                    >
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                            {/* Col 1: Vehicle Specs */}
-                            <div className="space-y-4">
+                    <TabsContent value="electricity">
+                        <CalculatorCard
+                            title="Electricity Consumption"
+                            description="Scope 2: Indirect emissions from purchased energy."
+                            result={results.electricity}
+                            onSave={() => handleSave("electricity", false)}
+                            onSaveAndView={() => handleSave("electricity", true)}
+                            onDownload={() => handleDownload("electricity")}
+                            loading={loading}
+                            valid={!!electricity.kwh}
+                        >
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <div className="space-y-2">
-                                    <Label>Vehicle Class</Label>
-                                    <div className="grid grid-cols-5 gap-2">
-                                        {['bike', 'car', 'suv', 'van', 'truck'].map(type => (
-                                            <Button
-                                                key={type}
-                                                type="button"
-                                                variant={vehicle.class === type ? "default" : "outline"}
-                                                onClick={() => setVehicle({ ...vehicle, class: type })}
-                                                className="capitalize h-16 sm:h-20 flex flex-col gap-1 text-[10px] sm:text-xs px-1"
-                                            >
-                                                {type === 'bike' && <Bike className="h-5 w-5" />}
-                                                {type === 'car' && <Car className="h-5 w-5" />}
-                                                {type === 'suv' && <Car className="h-6 w-6 scale-110" />}
-                                                {type === 'van' && <Truck className="h-5 w-5" />}
-                                                {type === 'truck' && <Truck className="h-6 w-6 scale-110" />}
-                                                {type === 'bike' ? '2-Wheel' : type}
-                                            </Button>
-                                        ))}
-                                    </div>
+                                    <Label>Monthly Consumption (kWh)</Label>
+                                    <Input
+                                        type="number"
+                                        placeholder="e.g. 5000"
+                                        value={electricity.kwh}
+                                        onChange={(e) => setElectricity({ ...electricity, kwh: e.target.value })}
+                                    />
                                 </div>
-
                                 <div className="space-y-2">
-                                    <Label>Fuel System</Label>
+                                    <Label>Energy Source</Label>
                                     <select
                                         className="flex h-10 w-full rounded-md border border-white/20 bg-black text-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-500 focus-visible:ring-offset-2 hover:bg-green-700 transition-colors cursor-pointer"
-                                        value={vehicle.fuel}
-                                        onChange={(e) => setVehicle({ ...vehicle, fuel: e.target.value })}
+                                        value={electricity.source}
+                                        onChange={(e) => setElectricity({ ...electricity, source: e.target.value })}
                                     >
-                                        <option className="bg-black text-white" value="petrol">Petrol (Gasoline)</option>
-                                        <option className="bg-black text-white" value="diesel">Diesel</option>
-                                        <option className="bg-black text-white" value="hybrid">Hybrid</option>
-                                        <option className="bg-black text-white" value="electric">Electric (EV)</option>
-                                        <option className="bg-black text-white" value="lpg">LPG (Autogas)</option>
-                                        <option className="bg-black text-white" value="cng">CNG (Natural Gas)</option>
+                                        <option className="bg-black text-white" value="grid">Grid Mix (Standard)</option>
+                                        <option className="bg-black text-white" value="solar">Solar (100% Renewable)</option>
+                                        <option className="bg-black text-white" value="wind">Wind (100% Renewable)</option>
+                                        <option className="bg-black text-white" value="hybrid">Hybrid (50/50 Mix)</option>
                                     </select>
                                 </div>
                             </div>
+                        </CalculatorCard>
+                    </TabsContent>
 
-                            {/* Col 2: Usage Specs */}
-                            <div className="space-y-4">
-                                <div className="space-y-2">
-                                    <Label className="flex justify-between">
-                                        <span>Efficiency ({vehicle.fuel === 'electric' ? 'kWh/100km' : 'L/100km'})</span>
-                                        <span className="text-xs text-muted-foreground font-normal">Auto-filled (modifiable)</span>
-                                    </Label>
-                                    <Input
-                                        type="number"
-                                        value={vehicle.efficiency}
-                                        onChange={(e) => setVehicle({ ...vehicle, efficiency: e.target.value })}
-                                    />
-                                    <p className="text-[10px] text-muted-foreground">
-                                        *Lower is better. Default values based on 2024 averages for {vehicle.class}.
-                                    </p>
-                                </div>
-
-                                <div className="space-y-2">
-                                    <Label>Distance Traveled (km)</Label>
-                                    <Input
-                                        type="number"
-                                        placeholder="e.g. 15000"
-                                        value={vehicle.distance}
-                                        onChange={(e) => setVehicle({ ...vehicle, distance: e.target.value })}
-                                    />
-                                </div>
-                            </div>
-                        </div>
-                    </CalculatorCard>
-                </TabsContent>
-
-                <TabsContent value="shipping">
-                    <CalculatorCard
-                        title="Logistics & Shipping"
-                        description="Scope 3: Upstream/Downstream transportation."
-                        result={results.shipping}
-                        onSave={() => handleSave("shipping")}
-                        onDownload={() => handleDownload("shipping")}
-                        loading={loading}
-                        valid={!!shipping.distance && !!shipping.weight}
-                    >
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div className="space-y-2">
-                                <Label>Data Input</Label>
-                                <div className="grid grid-cols-2 gap-4">
+                    <TabsContent value="vehicle">
+                        <CalculatorCard
+                            title="Vehicle Fleet & Travel"
+                            description="Scope 1: Direct emissions calculated via efficiency and fuel chemistry."
+                            result={results.vehicle}
+                            onSave={() => handleSave("vehicle", false)}
+                            onSaveAndView={() => handleSave("vehicle", true)}
+                            onDownload={() => handleDownload("vehicle")}
+                            loading={loading}
+                            valid={!!vehicle.distance}
+                        >
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                {/* Col 1: Vehicle Specs */}
+                                <div className="space-y-4">
                                     <div className="space-y-2">
-                                        <Label className="text-xs text-muted-foreground">Distance (km)</Label>
-                                        <Input
-                                            type="number"
-                                            placeholder="500"
-                                            value={shipping.distance}
-                                            onChange={(e) => setShipping({ ...shipping, distance: e.target.value })}
-                                        />
+                                        <Label>Vehicle Class</Label>
+                                        <div className="grid grid-cols-5 gap-2">
+                                            {['bike', 'car', 'suv', 'van', 'truck'].map(type => (
+                                                <Button
+                                                    key={type}
+                                                    type="button"
+                                                    variant={vehicle.class === type ? "default" : "outline"}
+                                                    onClick={() => setVehicle({ ...vehicle, class: type })}
+                                                    className="capitalize h-16 sm:h-20 flex flex-col gap-1 text-[10px] sm:text-xs px-1"
+                                                >
+                                                    {type === 'bike' && <Bike className="h-5 w-5" />}
+                                                    {type === 'car' && <Car className="h-5 w-5" />}
+                                                    {type === 'suv' && <Car className="h-6 w-6 scale-110" />}
+                                                    {type === 'van' && <Truck className="h-5 w-5" />}
+                                                    {type === 'truck' && <Truck className="h-6 w-6 scale-110" />}
+                                                    {type === 'bike' ? '2-Wheel' : type}
+                                                </Button>
+                                            ))}
+                                        </div>
                                     </div>
+
                                     <div className="space-y-2">
-                                        <Label className="text-xs text-muted-foreground">Weight (tons)</Label>
-                                        <Input
-                                            type="number"
-                                            placeholder="2.5"
-                                            value={shipping.weight}
-                                            onChange={(e) => setShipping({ ...shipping, weight: e.target.value })}
-                                        />
-                                    </div>
-                                </div>
-                            </div>
-                            <div className="space-y-2">
-                                <Label>Transport Details</Label>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div className="space-y-2">
-                                        <Label className="text-xs text-muted-foreground">Mode</Label>
+                                        <Label>Fuel System</Label>
                                         <select
                                             className="flex h-10 w-full rounded-md border border-white/20 bg-black text-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-500 focus-visible:ring-offset-2 hover:bg-green-700 transition-colors cursor-pointer"
-                                            value={shipping.mode}
-                                            onChange={(e) => setShipping({ ...shipping, mode: e.target.value })}
+                                            value={vehicle.fuel}
+                                            onChange={(e) => setVehicle({ ...vehicle, fuel: e.target.value })}
                                         >
-                                            <option className="bg-black text-white" value="road">Road (Diesel Truck)</option>
-                                            <option className="bg-black text-white" value="rail">Rail (Electric Freight)</option>
-                                            <option className="bg-black text-white" value="sea">Sea (Container Ship)</option>
-                                            <option className="bg-black text-white" value="air">Air (Cargo Jet)</option>
+                                            <option className="bg-black text-white" value="petrol">Petrol (Gasoline)</option>
+                                            <option className="bg-black text-white" value="diesel">Diesel</option>
+                                            <option className="bg-black text-white" value="hybrid">Hybrid</option>
+                                            <option className="bg-black text-white" value="electric">Electric (EV)</option>
+                                            <option className="bg-black text-white" value="lpg">LPG (Autogas)</option>
+                                            <option className="bg-black text-white" value="cng">CNG (Natural Gas)</option>
                                         </select>
                                     </div>
+                                </div>
+
+                                {/* Col 2: Usage Specs */}
+                                <div className="space-y-4">
                                     <div className="space-y-2">
-                                        <Label className="text-xs text-muted-foreground">Frequency/Month</Label>
+                                        <Label className="flex justify-between">
+                                            <span>Efficiency ({vehicle.fuel === 'electric' ? 'kWh/100km' : 'L/100km'})</span>
+                                            <span className="text-xs text-muted-foreground font-normal">Auto-filled (modifiable)</span>
+                                        </Label>
                                         <Input
                                             type="number"
-                                            placeholder="1"
-                                            value={shipping.frequency}
-                                            onChange={(e) => setShipping({ ...shipping, frequency: e.target.value })}
+                                            value={vehicle.efficiency}
+                                            onChange={(e) => setVehicle({ ...vehicle, efficiency: e.target.value })}
+                                        />
+                                        <p className="text-[10px] text-muted-foreground">
+                                            *Lower is better. Default values based on 2024 averages for {vehicle.class}.
+                                        </p>
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        <Label>Distance Traveled (km)</Label>
+                                        <Input
+                                            type="number"
+                                            placeholder="e.g. 15000"
+                                            value={vehicle.distance}
+                                            onChange={(e) => setVehicle({ ...vehicle, distance: e.target.value })}
                                         />
                                     </div>
                                 </div>
                             </div>
-                        </div>
-                    </CalculatorCard>
-                </TabsContent>
+                        </CalculatorCard>
+                    </TabsContent>
 
-                <TabsContent value="supply">
-                    <CalculatorCard
-                        title="Supply Chain Spend"
-                        description="Scope 3: Purchased goods and services (Spend-based method)."
-                        result={results.supply}
-                        onSave={() => handleSave("supply")}
-                        onDownload={() => handleDownload("supply")}
-                        loading={loading}
-                        valid={!!supply.spend}
-                    >
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div className="space-y-2">
-                                <Label>Expenditure ($ USD)</Label>
-                                <Input
-                                    type="number"
-                                    placeholder="e.g. 10000"
-                                    value={supply.spend}
-                                    onChange={(e) => setSupply({ ...supply, spend: e.target.value })}
-                                />
+                    <TabsContent value="shipping">
+                        <CalculatorCard
+                            title="Logistics & Shipping"
+                            description="Scope 3: Upstream/Downstream transportation."
+                            result={results.shipping}
+                            onSave={() => handleSave("shipping", false)}
+                            onSaveAndView={() => handleSave("shipping", true)}
+                            onDownload={() => handleDownload("shipping")}
+                            loading={loading}
+                            valid={!!shipping.distance && !!shipping.weight}
+                        >
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div className="space-y-2">
+                                    <Label>Data Input</Label>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="space-y-2">
+                                            <Label className="text-xs text-muted-foreground">Distance (km)</Label>
+                                            <Input
+                                                type="number"
+                                                placeholder="500"
+                                                value={shipping.distance}
+                                                onChange={(e) => setShipping({ ...shipping, distance: e.target.value })}
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label className="text-xs text-muted-foreground">Weight (tons)</Label>
+                                            <Input
+                                                type="number"
+                                                placeholder="2.5"
+                                                value={shipping.weight}
+                                                onChange={(e) => setShipping({ ...shipping, weight: e.target.value })}
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Transport Details</Label>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="space-y-2">
+                                            <Label className="text-xs text-muted-foreground">Mode</Label>
+                                            <select
+                                                className="flex h-10 w-full rounded-md border border-white/20 bg-black text-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-500 focus-visible:ring-offset-2 hover:bg-green-700 transition-colors cursor-pointer"
+                                                value={shipping.mode}
+                                                onChange={(e) => setShipping({ ...shipping, mode: e.target.value })}
+                                            >
+                                                <option className="bg-black text-white" value="road">Road (Diesel Truck)</option>
+                                                <option className="bg-black text-white" value="rail">Rail (Electric Freight)</option>
+                                                <option className="bg-black text-white" value="sea">Sea (Container Ship)</option>
+                                                <option className="bg-black text-white" value="air">Air (Cargo Jet)</option>
+                                            </select>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label className="text-xs text-muted-foreground">Frequency/Month</Label>
+                                            <Input
+                                                type="number"
+                                                placeholder="1"
+                                                value={shipping.frequency}
+                                                onChange={(e) => setShipping({ ...shipping, frequency: e.target.value })}
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
-                            <div className="space-y-2">
-                                <Label>Category</Label>
-                                <select
-                                    className="flex h-10 w-full rounded-md border border-white/20 bg-black text-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-500 focus-visible:ring-offset-2 hover:bg-green-700 transition-colors cursor-pointer"
-                                    value={supply.category}
-                                    onChange={(e) => setSupply({ ...supply, category: e.target.value })}
-                                >
-                                    <option className="bg-black text-white" value="manufacturing">Heavy Manufacturing</option>
-                                    <option className="bg-black text-white" value="services">Professional Services</option>
-                                    <option className="bg-black text-white" value="materials">Raw Materials Extraction</option>
-                                </select>
+                        </CalculatorCard>
+                    </TabsContent>
+
+                    <TabsContent value="supply">
+                        <CalculatorCard
+                            title="Supply Chain Spend"
+                            description="Scope 3: Purchased goods and services (Spend-based method)."
+                            result={results.supply}
+                            onSave={() => handleSave("supply", false)}
+                            onSaveAndView={() => handleSave("supply", true)}
+                            onDownload={() => handleDownload("supply")}
+                            loading={loading}
+                            valid={!!supply.spend}
+                        >
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div className="space-y-2">
+                                    <Label>Expenditure ($ USD)</Label>
+                                    <Input
+                                        type="number"
+                                        placeholder="e.g. 10000"
+                                        value={supply.spend}
+                                        onChange={(e) => setSupply({ ...supply, spend: e.target.value })}
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Category</Label>
+                                    <select
+                                        className="flex h-10 w-full rounded-md border border-white/20 bg-black text-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-500 focus-visible:ring-offset-2 hover:bg-green-700 transition-colors cursor-pointer"
+                                        value={supply.category}
+                                        onChange={(e) => setSupply({ ...supply, category: e.target.value })}
+                                    >
+                                        <option className="bg-black text-white" value="manufacturing">Heavy Manufacturing</option>
+                                        <option className="bg-black text-white" value="services">Professional Services</option>
+                                        <option className="bg-black text-white" value="materials">Raw Materials Extraction</option>
+                                    </select>
+                                </div>
                             </div>
-                        </div>
-                    </CalculatorCard>
-                </TabsContent>
-            </Tabs>
+                        </CalculatorCard>
+                    </TabsContent>
+                </Tabs>
+            </div>
         </div>
     );
 }
 
-function CalculatorCard({ title, description, children, result, onSave, onDownload, loading, valid }: any) {
+function CalculatorCard({ title, description, children, result, onSave, onSaveAndView, onDownload, loading, valid }: any) {
     return (
-        <Card className="border-t-4 border-t-primary shadow-lg overflow-hidden">
+        <Card className="border-t-4 border-t-primary shadow-lg overflow-hidden h-full">
             <CardHeader className="bg-muted/10 pb-8">
                 <CardTitle className="flex items-center gap-2">
                     {title}
@@ -422,7 +488,7 @@ function CalculatorCard({ title, description, children, result, onSave, onDownlo
             <CardContent className="space-y-6 pt-6">
                 {children}
 
-                <div className="mt-8 p-6 bg-primary/5 rounded-xl border border-primary/10 flex items-center justify-between">
+                <div className="mt-8 p-6 bg-primary/5 rounded-xl border border-primary/10 flex flex-col md:flex-row items-center justify-between gap-4">
                     <div>
                         <p className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Estimated Emissions</p>
                         <div className="flex items-baseline gap-2">
@@ -437,14 +503,18 @@ function CalculatorCard({ title, description, children, result, onSave, onDownlo
                             <span className="text-sm font-medium text-muted-foreground">tCO2e</span>
                         </div>
                     </div>
-                    <div className="flex gap-2">
-                        <Button onClick={onDownload} variant="outline" size="lg" disabled={!valid} className="shadow-sm">
-                            <Download className="mr-2 h-4 w-4" />
-                            Download PDF
+
+                    <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
+                        <Button onClick={onDownload} variant="outline" disabled={!valid} className="shadow-sm">
+                            <Download className="mr-2 h-4 w-4" /> PDF
                         </Button>
-                        <Button onClick={onSave} disabled={loading || !valid} size="lg" className="shadow-md hover:shadow-lg transition-all">
+                        <Button onClick={onSave} disabled={loading || !valid} variant="secondary" className="shadow-sm">
                             {loading ? <Loader2 className="animate-spin mr-2 h-4 w-4" /> : <Save className="mr-2 h-4 w-4" />}
-                            Save to Dashboard
+                            Save
+                        </Button>
+                        <Button onClick={onSaveAndView} disabled={loading || !valid} className="shadow-md hover:shadow-lg transition-all">
+                            {loading ? <Loader2 className="animate-spin mr-2 h-4 w-4" /> : <FileText className="mr-2 h-4 w-4" />}
+                            Save & View Report
                         </Button>
                     </div>
                 </div>

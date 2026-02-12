@@ -1,45 +1,42 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { jwtVerify } from "jose";
+import { getToken } from "next-auth/jwt";
 
-const JWT_SECRET = process.env.JWT_SECRET || "default-secret-key-change-me";
+// Paths that don't require authentication
+const PUBLIC_PATHS = [
+    "/splash",
+    "/login",
+    "/register",
+    "/api/auth",
+    "/_next",
+    "/static",
+    "/favicon.ico",
+    "/icon",
+    "/globals.css"
+];
 
 export async function middleware(req: NextRequest) {
-    const token = req.cookies.get("token")?.value;
     const { pathname } = req.nextUrl;
 
-    // Public paths
-    if (
-        pathname.startsWith("/_next") ||
-        pathname.startsWith("/api") ||
-        pathname.startsWith("/static") ||
-        pathname === "/login" ||
-        pathname === "/register" ||
-        pathname === "/splash" ||
-        pathname === "/favicon.ico"
-    ) {
+    // Check if the path is public
+    const isPublic = PUBLIC_PATHS.some(path => pathname.startsWith(path));
+
+    if (isPublic) {
         return NextResponse.next();
     }
 
-    // Check token
+    // Check for NextAuth session token
+    // getToken automatically handles encryption and cookie name (secure vs non-secure)
+    const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
+
     if (!token) {
-        // Redirect to splash for new users
+        // Redirect to splash if not authenticated
+        // Use 307 Temporary Redirect to preserve method if needed, usually 307 for auth redirects
         return NextResponse.redirect(new URL("/splash", req.url));
     }
 
-    // Allow mock token for demo
-    if (token.startsWith("mock-jwt-token") || token.startsWith("eyJhbGciOiJIUzI1NiJ9")) {
-        return NextResponse.next();
-    }
-
-    try {
-        const secret = new TextEncoder().encode(JWT_SECRET);
-        await jwtVerify(token, secret);
-        return NextResponse.next();
-    } catch (error) {
-        // Redirect to splash if token is invalid
-        return NextResponse.redirect(new URL("/splash", req.url));
-    }
+    // Allow request if authenticated
+    return NextResponse.next();
 }
 
 export const config = {

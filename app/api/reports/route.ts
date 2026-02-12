@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { connectToDB } from "@/lib/db";
 import Report from "@/models/Report";
 import Calculation from "@/models/Calculation";
+import AIAnalysis from "@/models/AIAnalysis";
 import { verifyJWT } from "@/lib/auth"; // Need to ensure this exists or create it
 import { cookies } from "next/headers";
 
@@ -33,32 +34,90 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
 
-        // Fetch recent calculations to summarize
-        const recentCalcs = await Calculation.find({ userId }).sort({ createdAt: -1 }).limit(50);
+        const body = await req.json().catch(() => ({}));
+        const { customReportData } = body;
 
-        let totalEmissions = 0;
-        let byType: any = {};
+        let reportData: any;
 
-        recentCalcs.forEach(c => {
-            totalEmissions += c.emissions;
-            byType[c.type] = (byType[c.type] || 0) + c.emissions;
-        });
+        if (customReportData) {
+            // Case 1: Saving a specific downloaded report (e.g. from Calculator)
+            reportData = {
+                userId,
+                title: customReportData.title || `Report - ${new Date().toLocaleDateString()}`,
+                summary: customReportData.summary || "Custom Report",
+                dataSnapshot: customReportData.dataSnapshot,
+                type: "pdf", // default
+                period: {
+                    startDate: new Date(),
+                    endDate: new Date()
+                }
+            };
+        } else {
+            // Case 2: Generating a general summary report (existing logic)
+            // Fetch recent calculations to summarize
+            const recentCalcs = await Calculation.find({ userId }).sort({ createdAt: -1 }).limit(50);
 
-        // Generate Summaries
-        const summary = `Total Emissions: ${totalEmissions.toFixed(2)} tCO2e. Top source: ${Object.keys(byType).sort((a, b) => byType[b] - byType[a])[0] || 'None'}.`;
+            let totalEmissions = 0;
+            let byType: any = {};
 
-        const report = await Report.create({
-            userId,
-            title: `Carbon Report - ${new Date().toLocaleDateString()}`,
-            summary,
-            dataSnapshot: { totalEmissions, byType, recentCalcs },
-            // In a real app, we'd generate a PDF buffer here and upload to S3, returning the URL
-            // For this demo, we'll return the ID and render the PDF on the client or a specialized view page
-        });
+            recentCalcs.forEach(c => {
+                totalEmissions += c.emissions;
+                byType[c.type] = (byType[c.type] || 0) + c.emissions;
+            });
+
+            // Generate Summaries
+            const summary = `Total Emissions: ${totalEmissions.toFixed(2)} tCO2e. Top source: ${Object.keys(byType).sort((a, b) => byType[b] - byType[a])[0] || 'None'}.`;
+
+            // Fetch latest AI Analysis
+            const latestAnalysis = await AIAnalysis.findOne({ userId }).sort({ createdAt: -1 });
+
+            reportData = {
+                userId,
+                title: `Carbon Report - ${new Date().toLocaleDateString()}`,
+                summary,
+                dataSnapshot: { totalEmissions, byType, recentCalcs },
+                aiInsightsSnapshot: latestAnalysis ? {
+                    summary: latestAnalysis.summary,
+                    recommendations: latestAnalysis.recommendations,
+                    riskFlags: latestAnalysis.riskFlags,
+                    innovativeIdea: latestAnalysis.innovativeIdea,
+                } : undefined,
+                type: "pdf",
+                period: {
+                    startDate: new Date(),
+                    endDate: new Date()
+                }
+            };
+        }
+
+        if (customReportData && customReportData.aiInsightsSnapshot) {
+            reportData.aiInsightsSnapshot = customReportData.aiInsightsSnapshot;
+        }
+
+        // Always try to attach latest AI analysis if not provided
+        if (!reportData.aiInsightsSnapshot) {
+            const latestAnalysis = await AIAnalysis.findOne({ userId }).sort({ createdAt: -1 });
+            if (latestAnalysis) {
+                reportData.aiInsightsSnapshot = {
+                    summary: latestAnalysis.summary,
+                    recommendations: latestAnalysis.recommendations,
+                    riskFlags: latestAnalysis.riskFlags,
+                    innovativeIdea: latestAnalysis.innovativeIdea,
+                };
+            }
+        }
+
+        // Explicitly set expiresAt to pass validation (90 days)
+        const ninetyDaysFromNow = new Date();
+        ninetyDaysFromNow.setDate(ninetyDaysFromNow.getDate() + 90);
+        reportData.expiresAt = ninetyDaysFromNow;
+
+        const report = await Report.create(reportData);
 
         return NextResponse.json({ success: true, reportId: report._id });
     } catch (error: any) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        console.error("API Error Creating Report:", error);
+        return NextResponse.json({ error: error.message || "Failed to create report" }, { status: 500 });
     }
 }
 

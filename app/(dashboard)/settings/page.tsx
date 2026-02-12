@@ -7,13 +7,44 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useTheme } from "next-themes";
-import { Moon, Sun, Monitor, User, Bell, Shield } from "lucide-react";
+import { Moon, Sun, Monitor, User, Bell, Shield, LogOut, Trash2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
 
 export default function SettingsPage() {
     const { setTheme } = useTheme();
+    const router = useRouter();
+    const [isLoggingOut, setIsLoggingOut] = useState(false);
+
+    const handleLogout = async () => {
+        try {
+            setIsLoggingOut(true);
+            const response = await fetch("/api/logout", {
+                method: "POST",
+            });
+
+            if (response.ok) {
+                // Clear local storage
+                if (typeof window !== 'undefined') {
+                    localStorage.clear();
+                    sessionStorage.clear();
+                }
+
+                // Redirect to login
+                router.push("/login");
+            } else {
+                alert("Logout failed. Please try again.");
+            }
+        } catch (error) {
+            console.error("Logout error:", error);
+            alert("Logout failed. Please try again.");
+        } finally {
+            setIsLoggingOut(false);
+        }
+    };
 
     return (
-        <div className="container mx-auto max-w-4xl space-y-8">
+        <div className="container mx-auto max-w-4xl space-y-8 p-6">
             <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -23,10 +54,11 @@ export default function SettingsPage() {
             </motion.div>
 
             <Tabs defaultValue="appearance" className="w-full">
-                <TabsList className="grid w-full grid-cols-3 lg:w-[400px]">
+                <TabsList className="grid w-full grid-cols-4 lg:w-[500px]">
                     <TabsTrigger value="appearance">Appearance</TabsTrigger>
                     <TabsTrigger value="profile">Profile</TabsTrigger>
                     <TabsTrigger value="notifications">Notifications</TabsTrigger>
+                    <TabsTrigger value="account">Account</TabsTrigger>
                 </TabsList>
 
                 <motion.div
@@ -117,6 +149,50 @@ export default function SettingsPage() {
                                         </div>
                                         <Input type="checkbox" className="h-4 w-4" defaultChecked />
                                     </div>
+                                </div>
+                            </CardContent>
+                        </Card>
+                    </TabsContent>
+
+                    <TabsContent value="account" className="mt-6 space-y-6">
+                        <Card>
+                            <CardHeader>
+                                <CardTitle>Account Management</CardTitle>
+                                <CardDescription>Manage your account settings</CardDescription>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                                <div className="flex items-center justify-between p-4 border rounded-lg">
+                                    <div className="space-y-0.5">
+                                        <Label className="text-base">Logout</Label>
+                                        <p className="text-sm text-muted-foreground">Sign out of your account</p>
+                                    </div>
+                                    <Button
+                                        variant="outline"
+                                        onClick={handleLogout}
+                                        disabled={isLoggingOut}
+                                    >
+                                        <LogOut className="mr-2 h-4 w-4" />
+                                        {isLoggingOut ? "Logging out..." : "Logout"}
+                                    </Button>
+                                </div>
+                            </CardContent>
+                        </Card>
+
+                        <Card className="border-destructive/50">
+                            <CardHeader>
+                                <CardTitle className="text-destructive">Danger Zone</CardTitle>
+                                <CardDescription>Irreversible actions</CardDescription>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                                <div className="flex items-center justify-between p-4 border border-destructive/50 rounded-lg">
+                                    <div className="space-y-0.5">
+                                        <Label className="text-base text-destructive">Delete Account</Label>
+                                        <p className="text-sm text-muted-foreground">Permanently delete your account and all data</p>
+                                    </div>
+                                    <Button variant="destructive" disabled>
+                                        <Trash2 className="mr-2 h-4 w-4" />
+                                        Delete Account
+                                    </Button>
                                 </div>
                             </CardContent>
                         </Card>

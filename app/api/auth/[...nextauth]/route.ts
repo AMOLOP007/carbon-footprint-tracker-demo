@@ -1,31 +1,60 @@
 
-import NextAuth from "next-auth"
-import GoogleProvider from "next-auth/providers/google"
-import AppleProvider from "next-auth/providers/apple"
-// Microsoft requires Azure AD provider
-import AzureADProvider from "next-auth/providers/azure-ad"
-import { connectToDB } from "@/lib/db"
-import User from "@/models/User"
+import NextAuth, { NextAuthOptions } from "next-auth";
+import GoogleProvider from "next-auth/providers/google";
+import CredentialsProvider from "next-auth/providers/credentials";
+import { connectToDB } from "@/lib/db";
+import User from "@/models/User";
+import bcrypt from "bcryptjs";
 
-export const authOptions = {
+export const authOptions: NextAuthOptions = {
     providers: [
         GoogleProvider({
             clientId: process.env.GOOGLE_CLIENT_ID || "",
             clientSecret: process.env.GOOGLE_CLIENT_SECRET || "",
         }),
-        AppleProvider({
-            clientId: process.env.APPLE_ID || "",
-            clientSecret: process.env.APPLE_SECRET || "",
-        }),
-        AzureADProvider({
-            clientId: process.env.AZURE_AD_CLIENT_ID || "",
-            clientSecret: process.env.AZURE_AD_CLIENT_SECRET || "",
-            tenantId: process.env.AZURE_AD_TENANT_ID,
-        }),
+        CredentialsProvider({
+            name: "Credentials",
+            credentials: {
+                email: { label: "Email", type: "email" },
+                password: { label: "Password", type: "password" }
+            },
+            async authorize(credentials) {
+                if (!credentials?.email || !credentials?.password) {
+                    throw new Error("Missing credentials");
+                }
+
+                await connectToDB();
+                const user = await User.findOne({ email: credentials.email.toLowerCase() }).select("+password");
+
+                if (!user) {
+                    throw new Error("Invalid credentials");
+                }
+
+                if (!user.password) {
+                    throw new Error("Please log in with Google");
+                }
+
+                const isMatch = await bcrypt.compare(credentials.password, user.password);
+
+                if (!isMatch) {
+                    throw new Error("Invalid credentials");
+                }
+
+                // Update last login
+                await User.findByIdAndUpdate(user._id, { lastLogin: new Date() });
+
+                return {
+                    id: user._id.toString(),
+                    name: user.name,
+                    email: user.email,
+                    role: user.role
+                };
+            }
+        })
     ],
     callbacks: {
         async signIn({ user, account, profile }: any) {
-            if (account.provider === 'google' || account.provider === 'apple' || account.provider === 'azure-ad') {
+            if (account?.provider === 'google') {
                 try {
                     await connectToDB();
                     const existingUser = await User.findOne({ email: user.email });
@@ -34,43 +63,58 @@ export const authOptions = {
                         await User.create({
                             name: user.name,
                             email: user.email,
-                            image: user.image,
-                            provider: account.provider,
-                            role: "user"
+                            provider: "google",
+                            providerId: account.providerAccountId,
+                            role: "user",
+                            lastLogin: new Date()
+                        });
+                    } else {
+                        // Link account if not already linked or update last login
+                        if (existingUser.provider !== "google") {
+                            // Optional: deciding how to handle account merging. 
+                            // For now, we'll allow it but update provider? 
+                            // Or just unblock them.
+                            // SAFE OPTION: Just update lastLogin
+                        }
+                        await User.findByIdAndUpdate(existingUser._id, {
+                            lastLogin: new Date(),
+                            // Ensure providerId is set if missing
+                            providerId: existingUser.providerId || account.providerAccountId
                         });
                     }
                     return true;
                 } catch (error) {
-                    console.error("Error saving user", error);
+                    console.error("Error saving Google user", error);
                     return false;
                 }
             }
             return true;
         },
-        async session({ session, token }: any) {
-            // Add user ID to session from DB
-            await connectToDB();
-            const dbUser = await User.findOne({ email: session.user.email });
-            if (dbUser) {
-                session.user.id = dbUser._id.toString();
-                session.user.role = dbUser.role;
-            }
-            return session;
-        },
-        async jwt({ token, user }: any) {
+        async jwt({ token, user, trigger, session }: any) {
             if (user) {
                 token.id = user.id;
+                token.role = user.role;
             }
             return token;
+        },
+        async session({ session, token }: any) {
+            if (session.user) {
+                session.user.id = token.id as string;
+                session.user.role = token.role as string;
+            }
+            return session;
         }
     },
     pages: {
         signIn: '/login',
-        error: '/auth/error',
+        error: '/login', // Redirect error back to login
     },
-    secret: process.env.NEXTAUTH_SECRET || "super_secret_fallback_key",
-}
+    session: {
+        strategy: "jwt",
+    },
+    secret: process.env.NEXTAUTH_SECRET,
+};
 
-const handler = NextAuth(authOptions)
+const handler = NextAuth(authOptions);
 
-export { handler as GET, handler as POST }
+export { handler as GET, handler as POST };

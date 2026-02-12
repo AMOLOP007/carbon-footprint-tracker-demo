@@ -8,9 +8,20 @@ import { Button } from "@/components/ui/button";
 
 export default function SplashPage() {
     const [step, setStep] = useState(0);
+    const [particles, setParticles] = useState<Array<{ id: number; x: number; y: number; size: number; duration: number; delay: number }>>([]);
     const containerRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
+        // Generate particles client-side only (fix hydration mismatch)
+        setParticles(Array.from({ length: 50 }).map((_, i) => ({
+            id: i,
+            x: Math.random() * 100,
+            y: Math.random() * 100,
+            size: Math.random() * 4 + 1,
+            duration: Math.random() * 20 + 10,
+            delay: Math.random() * 5,
+        })));
+
         // Sequence: Init -> Logo Buildup -> Heavy Text Reveal -> Choice UI
         const t1 = setTimeout(() => setStep(1), 500);
         const t2 = setTimeout(() => setStep(2), 2500);
@@ -23,15 +34,7 @@ export default function SplashPage() {
         };
     }, []);
 
-    // Generate random particles
-    const particles = Array.from({ length: 50 }).map((_, i) => ({
-        id: i,
-        x: Math.random() * 100,
-        y: Math.random() * 100,
-        size: Math.random() * 4 + 1,
-        duration: Math.random() * 20 + 10,
-        delay: Math.random() * 5,
-    }));
+
 
     return (
         <div className="relative min-h-screen flex items-center justify-center overflow-hidden bg-black text-white selection:bg-primary/30">

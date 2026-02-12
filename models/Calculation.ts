@@ -5,7 +5,7 @@ const CalculationSchema = new Schema({
     type: {
         type: String,
         required: true,
-        enum: ["electricity", "vehicle", "shipping", "supply"], // Strict validation
+        enum: ["electricity", "vehicle", "shipping", "supply", "supply_chain"], // Accept both supply and supply_chain
     },
     inputs: { type: Object, required: true }, // Dynamic based on type
     emissions: { type: Number, required: true }, // tCO2e

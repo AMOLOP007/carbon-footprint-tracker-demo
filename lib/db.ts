@@ -23,9 +23,12 @@ if (!cached) {
     cached = global.mongoose = { conn: null, promise: null };
 }
 
-export const connectToDB = async (retries = 3, delay = 1000) => {
+export const connectToDB = async (retries = 3, delay = 1000): Promise<typeof mongoose> => {
     if (cached.conn) {
-        return cached.conn;
+        // Return existing connection if ready
+        if (cached.conn.connection.readyState === 1) {
+            return cached.conn;
+        }
     }
 
     if (!MONGODB_URI) {
@@ -40,6 +43,7 @@ export const connectToDB = async (retries = 3, delay = 1000) => {
                 socketTimeoutMS: 45000,
             };
             cached.promise = mongoose.connect(fallbackURI, opts).then((mongoose) => {
+                console.log("✅ MongoDB connected (fallback)");
                 return mongoose;
             });
         }
@@ -49,8 +53,15 @@ export const connectToDB = async (retries = 3, delay = 1000) => {
                 bufferCommands: false,
                 serverSelectionTimeoutMS: 5000,
                 socketTimeoutMS: 45000,
+                family: 4,
             };
+
+            // Log the URI being used (masking password)
+            const maskedURI = MONGODB_URI.replace(/:([^:@]+)@/, ':****@');
+            console.log(`[DB] Attempting connection to: ${maskedURI}`);
+
             cached.promise = mongoose.connect(MONGODB_URI, opts).then((mongoose) => {
+                console.log("✅ MongoDB connected");
                 return mongoose;
             });
         }
@@ -58,6 +69,13 @@ export const connectToDB = async (retries = 3, delay = 1000) => {
 
     try {
         cached.conn = await cached.promise;
+
+        // Wait for connection to be fully ready
+        if (cached.conn.connection.readyState !== 1) {
+            // Give it a moment to establish
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+
     } catch (e) {
         cached.promise = null;
         if (retries > 0) {
@@ -73,6 +91,6 @@ export const connectToDB = async (retries = 3, delay = 1000) => {
     }
 
     return cached.conn;
-}
+};
 
 export default connectToDB;
