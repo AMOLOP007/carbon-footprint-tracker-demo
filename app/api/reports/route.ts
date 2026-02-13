@@ -3,26 +3,40 @@ import { connectToDB } from "@/lib/db";
 import Report from "@/models/Report";
 import Calculation from "@/models/Calculation";
 import AIAnalysis from "@/models/AIAnalysis";
-import { verifyJWT } from "@/lib/auth"; // Need to ensure this exists or create it
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth-options";
 import { cookies } from "next/headers";
+import { verifyJWT } from "@/lib/auth";
 
 async function getUserId() {
+    // 1. Try NextAuth Session (Standard Production Path)
+    const session = await getServerSession(authOptions);
+    if (session?.user?.id) {
+        console.log("[AUTH DEBUG] Session found via NextAuth:", session.user.id);
+        return session.user.id;
+    }
+
+    // 2. Fallback to custom token cookie (Legacy / Demo / Mock)
     const cookieStore = await cookies();
     const token = cookieStore.get("token")?.value;
 
-    if (!token) return null;
+    console.log("[AUTH DEBUG] NextAuth failed. Checking custom token:", !!token);
 
-    // For demo/hardcoded user
-    if (token.startsWith("mock-jwt-token") || token.startsWith("eyJhbGciOiJIUzI1NiJ9")) {
-        return "507f1f77bcf86cd799439011";
+    if (token) {
+        // For demo/hardcoded user
+        if (token.startsWith("mock-jwt-token") || token.startsWith("eyJhbGciOiJIUzI1NiJ9")) {
+            return "507f1f77bcf86cd799439011";
+        }
+
+        try {
+            const payload = await verifyJWT(token) as any;
+            return payload?.id;
+        } catch (e) {
+            console.error("[AUTH DEBUG] JWT Verification failed:", e);
+        }
     }
 
-    try {
-        const payload = await verifyJWT(token) as any;
-        return payload?.id;
-    } catch (e) {
-        return null;
-    }
+    return null;
 }
 
 export async function POST(req: Request) {

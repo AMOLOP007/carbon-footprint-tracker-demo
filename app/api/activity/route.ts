@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { connectToDB } from "@/lib/db";
 import { getRecentActivities, getActivitiesByCategory } from "@/lib/activity/tracker";
 import { getServerSession } from "next-auth";
-import { authOptions } from "../auth/[...nextauth]/route";
+import { authOptions } from "@/lib/auth-options";
 import { cookies } from "next/headers";
 import { verifyJWT } from "@/lib/auth";
 

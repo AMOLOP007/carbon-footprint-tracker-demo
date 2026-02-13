@@ -4,7 +4,7 @@ import Calculation from "@/models/Calculation";
 import { verifyJWT } from "@/lib/auth";
 import { cookies } from "next/headers";
 import { getServerSession } from "next-auth";
-import { authOptions } from "../auth/[...nextauth]/route";
+import { authOptions } from "@/lib/auth-options";
 import { cache } from "@/lib/cache";
 
 

@@ -1,7 +1,8 @@
 "use client";
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Lightbulb, TrendingUp, AlertTriangle, CheckCircle, Info, RefreshCw, Loader2, Zap, Brain, Sparkles, Activity } from "lucide-react";
+import { Lightbulb, TrendingUp, AlertTriangle, CheckCircle, Info, RefreshCw, Loader2, Zap, Brain, Sparkles, Activity, Download } from "lucide-react";
+import { generateReportPDF } from "@/lib/pdf-generator";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useEffect, useState } from "react";
@@ -131,6 +132,24 @@ export default function InsightsClient() {
         }
     };
 
+    const handleDownloadReport = () => {
+        if (!analysis) return;
+
+        const reportData = {
+            title: "Strategic AI Analysis",
+            summary: analysis.summary,
+            dataSnapshot: {
+                totalEmissions: 0, // In a real app we'd fetch this or pass it down
+                byType: {},
+                recentCalcs: []
+            },
+            aiAnalysis: analysis
+        };
+
+        generateReportPDF(reportData);
+        toast.success("Downloading report...");
+    };
+
     if (loading || generating) {
         return (
             <div className="fixed inset-0 z-50 bg-background/90 backdrop-blur-md flex flex-col items-center justify-center">
@@ -177,14 +196,25 @@ export default function InsightsClient() {
                         <p className="text-muted-foreground">Strategic analysis based on your live emissions data.</p>
                     </div>
                 </div>
-                <Button
-                    onClick={() => generateNewAnalysis(true)}
-                    disabled={generating}
-                    size="lg"
-                    className="shadow-lg hover:shadow-primary/25 transition-all"
-                >
-                    <RefreshCw className="mr-2 h-4 w-4" /> Regenerate Analysis
-                </Button>
+                <div className="flex gap-2">
+                    <Button
+                        onClick={handleDownloadReport}
+                        disabled={generating || !analysis}
+                        variant="outline"
+                        size="lg"
+                        className="shadow-sm"
+                    >
+                        <Download className="mr-2 h-4 w-4" /> Download Report
+                    </Button>
+                    <Button
+                        onClick={() => generateNewAnalysis(true)}
+                        disabled={generating}
+                        size="lg"
+                        className="shadow-lg hover:shadow-primary/25 transition-all"
+                    >
+                        <RefreshCw className="mr-2 h-4 w-4" /> Regenerate Analysis
+                    </Button>
+                </div>
             </div>
 
             {!analysis ? (

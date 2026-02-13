@@ -118,6 +118,19 @@ export default function CalculatorPage() {
             return;
         }
 
+        toast.loading("Gathering insights...");
+
+        let aiAnalysis = null;
+        try {
+            const res = await fetch("/api/insights/generate");
+            const data = await res.json();
+            if (data.success) {
+                aiAnalysis = data.analysis;
+            }
+        } catch (e) {
+            console.error("Failed to fetch AI analysis for report", e);
+        }
+
         const reportData = {
             title: `${type.charAt(0).toUpperCase() + type.slice(1)} Emissions Report`,
             summary: `Instant report for ${type} emissions calculation.`,
@@ -129,9 +142,11 @@ export default function CalculatorPage() {
                     type: type,
                     emissions: emissions
                 }]
-            }
+            },
+            aiAnalysis
         };
 
+        toast.dismiss();
         // Generate PDF locally
         generateReportPDF(reportData);
         toast.success("Download started.");
@@ -195,11 +210,13 @@ export default function CalculatorPage() {
                             }
                         };
 
+                        console.log("Sending report generation request to /api/reports...");
                         const reportRes = await fetch("/api/reports", {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },
                             body: JSON.stringify({ customReportData: reportData }),
                         });
+                        console.log("Report response status:", reportRes.status);
 
                         if (!reportRes.ok) {
                             const errData = await reportRes.json().catch(() => ({}));

@@ -4,7 +4,7 @@ import Calculation from "@/models/Calculation";
 import Report from "@/models/Report";
 import AIAnalysis from "@/models/AIAnalysis";
 import { getServerSession } from "next-auth";
-import { authOptions } from "../auth/[...nextauth]/route";
+import { authOptions } from "@/lib/auth-options";
 import { cookies } from "next/headers";
 import { verifyJWT } from "@/lib/auth";
 import { logActivity } from "@/lib/activity/tracker";

@@ -6,7 +6,7 @@ import Report from "@/models/Report";
 import Goal from "@/models/Goal";
 import { generateSustainabilityAnalysis } from "@/lib/ai/openaiService";
 import { getServerSession } from "next-auth";
-import { authOptions } from "../../auth/[...nextauth]/route";
+import { authOptions } from "@/lib/auth-options";
 import { cookies } from "next/headers";
 import { verifyJWT } from "@/lib/auth";
 

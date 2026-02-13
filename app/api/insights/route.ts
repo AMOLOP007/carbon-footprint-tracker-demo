@@ -3,7 +3,7 @@ import { connectToDB } from "@/lib/db";
 import Calculation from "@/models/Calculation";
 import Insight from "@/models/Insight";
 import { getServerSession } from "next-auth";
-import { authOptions } from "../auth/[...nextauth]/route";
+import { authOptions } from "@/lib/auth-options";
 import { cookies } from "next/headers";
 import { verifyJWT } from "@/lib/auth";
 
