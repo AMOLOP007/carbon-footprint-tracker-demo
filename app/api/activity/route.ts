@@ -1,42 +1,20 @@
 import { NextResponse } from "next/server";
 import { connectToDB } from "@/lib/db";
 import { getRecentActivities, getActivitiesByCategory } from "@/lib/utils/activity";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth/options";
-import { cookies } from "next/headers";
-import { verifyJWT } from "@/lib/auth";
-
-// Get user ID helper
-async function getUserId() {
-    const session = await getServerSession(authOptions);
-    if (session?.user?.id) return session.user.id;
-    if (session?.user?.email) {
-        const User = (await import("@/models/User")).default;
-        const dbUser = await User.findOne({ email: session.user.email });
-        if (dbUser) return dbUser._id;
-    }
-
-    const cookieStore = await cookies();
-    const token = cookieStore.get("token")?.value;
-    if (!token) return null;
-
-    if (token.startsWith("mock-jwt-token") || token.startsWith("eyJhbGciOiJIUzI1NiJ9")) {
-        return "507f1f77bcf86cd799439011";
-    }
-
-    try {
-        const payload = await verifyJWT(token) as any;
-        return payload?.id;
-    } catch (e) {
-        return null;
-    }
-}
+import { getUserId } from "@/lib/auth/getUserId";
+import { rateLimiter } from "@/lib/security/rateLimiter";
 
 /**
  * GET /api/activity - Get activity log for the current user
  */
 export async function GET(req: Request) {
     try {
+        const ip = req.headers.get("x-forwarded-for") ?? "unknown";
+        const rateLimit = await rateLimiter(ip, { windowMs: 60 * 1000, maxRequests: 60 });
+        if (!rateLimit.success) {
+            return NextResponse.json({ success: false, message: "Too many requests" }, { status: 429 });
+        }
+
         await connectToDB();
 
         const userId = await getUserId();
@@ -46,7 +24,7 @@ export async function GET(req: Request) {
 
         const url = new URL(req.url);
         const category = url.searchParams.get("category");
-        const limit = parseInt(url.searchParams.get("limit") || "50");
+        const limit = Math.min(Math.max(parseInt(url.searchParams.get("limit") || "50", 10), 1), 500);
 
         let activities;
         if (category) {

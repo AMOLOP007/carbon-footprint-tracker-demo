@@ -38,6 +38,14 @@ const UserSchema = new Schema({
     },
     lastLogin: {
         type: Date
+    },
+    failedLoginAttempts: {
+        type: Number,
+        default: 0
+    },
+    lockoutUntil: {
+        type: Date,
+        default: null
     }
 });
 

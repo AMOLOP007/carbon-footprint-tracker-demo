@@ -10,23 +10,7 @@ import { authOptions } from "@/lib/auth/options";
 import { cookies } from "next/headers";
 import { verifyJWT } from "@/lib/auth";
 
-// Helper to get User ID (reused from other routes)
-async function getUserId() {
-    const session = await getServerSession(authOptions);
-    if (session?.user?.id) return session.user.id;
-
-    // Fallback for cookie/token based auth
-    const cookieStore = await cookies();
-    const token = cookieStore.get("token")?.value;
-    if (!token) return null;
-
-    try {
-        const payload = await verifyJWT(token) as any;
-        return payload?.id;
-    } catch (e) {
-        return null;
-    }
-}
+import { getUserId } from "@/lib/auth/getUserId";
 
 import { rateLimiter } from "@/lib/security/rateLimiter";
 
@@ -34,7 +18,7 @@ export async function POST(req: Request) {
     try {
         // Rate limiting
         const ip = req.headers.get("x-forwarded-for") ?? "unknown";
-        const rateLimit = rateLimiter(ip, { windowMs: 60 * 60 * 1000, maxRequests: 5 }); // strict limit for expensive AI operation
+        const rateLimit = await rateLimiter(ip, { windowMs: 60 * 60 * 1000, maxRequests: 5 }); // strict limit for expensive AI operation
         if (!rateLimit.success) {
             return NextResponse.json({ message: "Too many requests. Try again later." }, { status: 429 });
         }

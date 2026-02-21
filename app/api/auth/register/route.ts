@@ -15,7 +15,7 @@ export async function POST(req: Request) {
     try {
         // Rate limiting based on IP (Fallback to generic if ip header missing)
         const ip = req.headers.get("x-forwarded-for") ?? "unknown";
-        const rateLimit = rateLimiter(ip, { windowMs: 15 * 60 * 1000, maxRequests: 5 }); // 5 regs per 15 mins
+        const rateLimit = await rateLimiter(ip, { windowMs: 15 * 60 * 1000, maxRequests: 5 }); // 5 regs per 15 mins
         if (!rateLimit.success) {
             return NextResponse.json({ message: "Too many requests. Try again later." }, { status: 429 });
         }

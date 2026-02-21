@@ -8,8 +8,8 @@ import bcrypt from "bcryptjs";
 export const authOptions: NextAuthOptions = {
     providers: [
         GoogleProvider({
-            clientId: process.env.GOOGLE_CLIENT_ID || "",
-            clientSecret: process.env.GOOGLE_CLIENT_SECRET || "",
+            clientId: process.env.GOOGLE_CLIENT_ID!,
+            clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
         }),
         CredentialsProvider({
             name: "Credentials",
@@ -23,10 +23,14 @@ export const authOptions: NextAuthOptions = {
                 }
 
                 await connectToDB();
-                const user = await User.findOne({ email: credentials.email.toLowerCase() }).select("+password");
+                const user = await User.findOne({ email: credentials.email.toLowerCase() }).select("+password +failedLoginAttempts +lockoutUntil");
 
                 if (!user) {
                     throw new Error("Invalid credentials");
+                }
+
+                if (user.lockoutUntil && user.lockoutUntil > new Date()) {
+                    throw new Error("Account temporarily locked. Try again later.");
                 }
 
                 if (!user.password) {
@@ -36,11 +40,21 @@ export const authOptions: NextAuthOptions = {
                 const isMatch = await bcrypt.compare(credentials.password, user.password);
 
                 if (!isMatch) {
+                    const attempts = (user.failedLoginAttempts || 0) + 1;
+                    let updates: any = { failedLoginAttempts: attempts };
+                    if (attempts >= 5) {
+                        updates.lockoutUntil = new Date(Date.now() + 15 * 60 * 1000);
+                    }
+                    await User.findByIdAndUpdate(user._id, updates);
                     throw new Error("Invalid credentials");
                 }
 
-                // Update last login
-                await User.findByIdAndUpdate(user._id, { lastLogin: new Date() });
+                // Update last login and reset lockout
+                await User.findByIdAndUpdate(user._id, {
+                    lastLogin: new Date(),
+                    failedLoginAttempts: 0,
+                    lockoutUntil: null
+                });
 
                 return {
                     id: user._id.toString(),
@@ -125,7 +139,7 @@ export const authOptions: NextAuthOptions = {
     },
     session: {
         strategy: "jwt",
-        maxAge: 30 * 24 * 60 * 60, // 30 days
+        maxAge: 7 * 24 * 60 * 60, // 7 days
     },
     cookies: {
         sessionToken: {

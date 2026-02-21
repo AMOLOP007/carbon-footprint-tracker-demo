@@ -2,40 +2,9 @@ import { NextResponse } from "next/server";
 import { connectToDB } from "@/lib/db";
 import Calculation from "@/models/Calculation";
 import Goal from "@/models/Goal";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth/options";
-import { cookies } from "next/headers";
-import { verifyJWT } from "@/lib/auth";
 import { cache } from "@/lib/db/cache";
-
-// Get user ID (same logic as calculator)
-async function getUserId() {
-    const session = await getServerSession(authOptions);
-    if (session?.user?.id) {
-        return session.user.id;
-    }
-    if (session?.user?.email) {
-        const User = (await import("@/models/User")).default;
-        const dbUser = await User.findOne({ email: session.user.email });
-        if (dbUser) return dbUser._id;
-    }
-
-    const cookieStore = await cookies();
-    const token = cookieStore.get("token")?.value;
-
-    if (!token) return null;
-
-    if (token.startsWith("mock-jwt-token") || token.startsWith("eyJhbGciOiJIUzI1NiJ9")) {
-        return "507f1f77bcf86cd799439011";
-    }
-
-    try {
-        const payload = await verifyJWT(token) as any;
-        return payload?.id;
-    } catch (e) {
-        return null;
-    }
-}
+import { getUserId } from "@/lib/auth/getUserId";
+import { rateLimiter } from "@/lib/security/rateLimiter";
 
 /**
  * GET /api/dashboard
@@ -44,6 +13,12 @@ async function getUserId() {
  */
 export async function GET(req: Request) {
     try {
+        const ip = req.headers.get("x-forwarded-for") ?? "unknown";
+        const rateLimit = await rateLimiter(ip, { windowMs: 60 * 1000, maxRequests: 60 });
+        if (!rateLimit.success) {
+            return NextResponse.json({ success: false, message: "Too many requests" }, { status: 429 });
+        }
+
         // Attempt DB connection with timeout
         const dbConnectionPromise = connectToDB();
         const timeoutPromise = new Promise((_, reject) =>
@@ -76,22 +51,10 @@ export async function GET(req: Request) {
         const userId = await getUserId();
 
         if (!userId) {
-            // Return empty data for unauthorized instead of 401
-            return NextResponse.json({
-                success: true,
-                data: {
-                    totalEmissions: 0,
-                    monthlyEmissions: 0,
-                    reductionPercentage: 0,
-                    totalCalculations: 0,
-                    sustainabilityScore: 0,
-                    hasData: false,
-                    categoryBreakdown: {},
-                    trendData: [],
-                    goalsProgress: []
-                },
-                unauthorized: true
-            });
+            return NextResponse.json(
+                { success: false, message: "Unauthorized" },
+                { status: 401 }
+            );
         }
 
         // Check cache first

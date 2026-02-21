@@ -44,7 +44,9 @@ export const connectToDB = async (retries = 3, delay = 1000): Promise<typeof mon
         };
 
         const maskedURI = MONGODB_URI.replace(/:([^:@]+)@/, ':****@');
-        console.log(`[DB] Attempting connection to: ${maskedURI}`);
+        if (process.env.NODE_ENV !== "production") {
+            console.log(`[DB] Attempting connection to: ${maskedURI}`);
+        }
 
         cached.promise = mongoose.connect(MONGODB_URI, opts).then((mongoose) => {
             console.log("✅ MongoDB connected");

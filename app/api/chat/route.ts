@@ -1,30 +1,18 @@
 import { NextResponse } from "next/server";
 import { connectToDB } from "@/lib/db";
 import ChatSession from "@/models/ChatSession";
-import { verifyJWT } from "@/lib/auth"; // Need to ensure this exists or create it
-import { cookies } from "next/headers";
-
-async function getUserId() {
-    const cookieStore = await cookies();
-    const token = cookieStore.get("token")?.value;
-
-    if (!token) return null;
-
-    // For demo/hardcoded user
-    if (token.startsWith("mock-jwt-token") || token.startsWith("eyJhbGciOiJIUzI1NiJ9")) {
-        return "507f1f77bcf86cd799439011";
-    }
-
-    try {
-        const payload = await verifyJWT(token) as any;
-        return payload?.id;
-    } catch (e) {
-        return null;
-    }
-}
+import { getUserId } from "@/lib/auth/getUserId";
+import { rateLimiter } from "@/lib/security/rateLimiter";
 
 export async function POST(req: Request) {
     let userId = "guest";
+
+    // Rate limiting
+    const ip = req.headers.get("x-forwarded-for") ?? "unknown";
+    const rateLimit = await rateLimiter(ip, { windowMs: 60 * 1000, maxRequests: 30 });
+    if (!rateLimit.success) {
+        return NextResponse.json({ success: false, message: "Too many requests" }, { status: 429 });
+    }
 
     try {
         const { message, context } = await req.json();
@@ -102,16 +90,21 @@ export async function POST(req: Request) {
         return NextResponse.json({ success: true, message: aiResponse });
     } catch (error: any) {
         console.error("Critical Chat API Error:", error);
-        // Fallback response even on critical error
         return NextResponse.json({
-            success: true,
-            message: "I'm experiencing some heavy traffic, but I'm still here. Could you try asking that again?"
-        });
+            success: false,
+            message: "Internal Server Error"
+        }, { status: 500 });
     }
 }
 
 export async function GET(req: Request) {
     try {
+        const ip = req.headers.get("x-forwarded-for") ?? "unknown";
+        const rateLimit = await rateLimiter(ip, { windowMs: 60 * 1000, maxRequests: 60 });
+        if (!rateLimit.success) {
+            return NextResponse.json({ success: false, message: "Too many requests" }, { status: 429 });
+        }
+
         await connectToDB();
         const userId = await getUserId();
         if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -119,6 +112,7 @@ export async function GET(req: Request) {
         const session = await ChatSession.findOne({ userId });
         return NextResponse.json({ success: true, messages: session ? session.messages : [] });
     } catch (error: any) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        console.error(error);
+        return NextResponse.json({ success: false, message: "Internal Server Error" }, { status: 500 });
     }
 }

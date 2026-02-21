@@ -3,44 +3,25 @@ import { connectToDB } from "@/lib/db";
 import Report from "@/models/Report";
 import Calculation from "@/models/Calculation";
 import AIAnalysis from "@/models/AIAnalysis";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth/options";
-import { cookies } from "next/headers";
-import { verifyJWT } from "@/lib/auth";
+import { getUserId } from "@/lib/auth/getUserId";
+import { rateLimiter } from "@/lib/security/rateLimiter";
+import { z } from "zod";
 
-async function getUserId() {
-    // 1. Try NextAuth Session (Standard Production Path)
-    const session = await getServerSession(authOptions);
-    if (session?.user?.id) {
-        console.log("[AUTH DEBUG] Session found via NextAuth:", session.user.id);
-        return session.user.id;
-    }
-
-    // 2. Fallback to custom token cookie (Legacy / Demo / Mock)
-    const cookieStore = await cookies();
-    const token = cookieStore.get("token")?.value;
-
-    console.log("[AUTH DEBUG] NextAuth failed. Checking custom token:", !!token);
-
-    if (token) {
-        // For demo/hardcoded user
-        if (token.startsWith("mock-jwt-token") || token.startsWith("eyJhbGciOiJIUzI1NiJ9")) {
-            return "507f1f77bcf86cd799439011";
-        }
-
-        try {
-            const payload = await verifyJWT(token) as any;
-            return payload?.id;
-        } catch (e) {
-            console.error("[AUTH DEBUG] JWT Verification failed:", e);
-        }
-    }
-
-    return null;
-}
+const customReportSchema = z.object({
+    title: z.string().max(200).optional(),
+    summary: z.string().max(1000).optional(),
+    dataSnapshot: z.any().optional(),
+    aiInsightsSnapshot: z.any().optional()
+}).optional();
 
 export async function POST(req: Request) {
     try {
+        const ip = req.headers.get("x-forwarded-for") ?? "unknown";
+        const rateLimit = await rateLimiter(ip, { windowMs: 15 * 60 * 1000, maxRequests: 10 });
+        if (!rateLimit.success) {
+            return NextResponse.json({ success: false, message: "Too many requests" }, { status: 429 });
+        }
+
         await connectToDB();
         const userId = await getUserId();
 
@@ -49,7 +30,15 @@ export async function POST(req: Request) {
         }
 
         const body = await req.json().catch(() => ({}));
-        const { customReportData } = body;
+
+        let customReportData;
+        if (body.customReportData) {
+            const validation = customReportSchema.safeParse(body.customReportData);
+            if (!validation.success) {
+                return NextResponse.json({ error: validation.error.errors[0].message }, { status: 400 });
+            }
+            customReportData = validation.data;
+        }
 
         let reportData: any;
 
@@ -131,12 +120,18 @@ export async function POST(req: Request) {
         return NextResponse.json({ success: true, reportId: report._id });
     } catch (error: any) {
         console.error("API Error Creating Report:", error);
-        return NextResponse.json({ error: error.message || "Failed to create report" }, { status: 500 });
+        return NextResponse.json({ success: false, message: "Internal Server Error" }, { status: 500 });
     }
 }
 
 export async function GET(req: Request) {
     try {
+        const ip = req.headers.get("x-forwarded-for") ?? "unknown";
+        const rateLimit = await rateLimiter(ip, { windowMs: 60 * 1000, maxRequests: 60 });
+        if (!rateLimit.success) {
+            return NextResponse.json({ success: false, message: "Too many requests" }, { status: 429 });
+        }
+
         await connectToDB();
         const userId = await getUserId();
         if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -144,6 +139,7 @@ export async function GET(req: Request) {
         const reports = await Report.find({ userId }).sort({ createdAt: -1 });
         return NextResponse.json({ success: true, reports });
     } catch (error: any) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        console.error(error);
+        return NextResponse.json({ success: false, message: "Internal Server Error" }, { status: 500 });
     }
 }

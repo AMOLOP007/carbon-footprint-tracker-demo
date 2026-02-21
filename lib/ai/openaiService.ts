@@ -24,6 +24,20 @@ export interface AIAnalysisResult {
     };
 }
 
+/**
+ * Sanitize user-controlled data before embedding in AI prompts.
+ * Strips prompt-injection attempts and control characters.
+ */
+function sanitizeForPrompt(input: any, maxLength = 500): string {
+    const str = typeof input === 'object' ? JSON.stringify(input) : String(input ?? '');
+    // Strip potential injection patterns
+    return str
+        .replace(/ignore\s+(previous|above|all)\s+(instructions?|prompts?)/gi, '[filtered]')
+        .replace(/system\s*:/gi, '[filtered]')
+        .replace(/```/g, '')
+        .slice(0, maxLength);
+}
+
 export async function generateSustainabilityAnalysis(
     emissionsData: any,
     recentReports: any[],
@@ -42,20 +56,24 @@ export async function generateSustainabilityAnalysis(
     }
 
     if (!process.env.OPENAI_API_KEY) {
-        // console.warn("OPENAI_API_KEY is not set. Using advanced fallback protocol.");
         return getFallbackAnalysis(emissionsData);
     }
 
     try {
+        const sanitizedTotal = sanitizeForPrompt(emissionsData.total, 50);
+        const sanitizedCategories = sanitizeForPrompt(emissionsData.byCategory, 300);
+        const sanitizedTrends = sanitizeForPrompt(emissionsData.trends, 300);
+        const sanitizedGoals = sanitizeForPrompt(goals.map(g => ({ title: g.title, target: g.target, status: g.status })), 500);
+
         const prompt = `
             Act as a Senior Sustainability Consultant for a corporation.
             Analyze the following data and provide a strategic analysis.
 
             DATA CONTEXT:
-            - Total Emissions: ${emissionsData.total} tCO2e
-            - Breakdown by Category: ${JSON.stringify(emissionsData.byCategory)}
-            - Recent Trends: ${JSON.stringify(emissionsData.trends)}
-            - Active Goals: ${JSON.stringify(goals)}
+            - Total Emissions: ${sanitizedTotal} tCO2e
+            - Breakdown by Category: ${sanitizedCategories}
+            - Recent Trends: ${sanitizedTrends}
+            - Active Goals: ${sanitizedGoals}
 
             REQUIREMENTS:
             1. Executive Summary: concise, professional, highlighting key status.

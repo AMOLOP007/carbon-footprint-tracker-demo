@@ -4,16 +4,22 @@ import User from "@/models/User";
 import Calculation from "@/models/Calculation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth/options";
+import { rateLimiter } from "@/lib/security/rateLimiter";
 
 export async function GET(req: Request) {
     try {
+        const ip = req.headers.get("x-forwarded-for") ?? "unknown";
+        const rateLimit = await rateLimiter(ip, { windowMs: 15 * 60 * 1000, maxRequests: 50 });
+        if (!rateLimit.success) {
+            return NextResponse.json({ success: false, message: "Too many requests" }, { status: 429 });
+        }
+
         await connectToDB();
 
-        // Optional: Secure this route. For now, checking if user exists/is admin is good.
         const session = await getServerSession(authOptions);
-        // Simple check: Allow if logged in, or remove check for purely open stats (as requested for "Owner Visibility")
-        // User requested "Owner Visibility", not public. But if I make it strict admin only, I need to know how to make an admin.
-        // For simplicity and "Owner Visibility", I'll return basics.
+        if (!session?.user || session.user.role !== "admin") {
+            return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
+        }
 
         const userCount = await User.countDocuments();
         const calculationCount = await Calculation.countDocuments();
@@ -32,6 +38,7 @@ export async function GET(req: Request) {
         });
 
     } catch (error: any) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        console.error("Admin Stats API Error:", error);
+        return NextResponse.json({ success: false, message: "Internal Server Error" }, { status: 500 });
     }
 }

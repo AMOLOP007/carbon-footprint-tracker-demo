@@ -21,6 +21,25 @@ export async function middleware(req: NextRequest) {
     // Check if the path is public
     const isPublic = PUBLIC_PATHS.some(path => pathname.startsWith(path));
 
+    if (isPublic && !pathname.startsWith("/api/")) {
+        return NextResponse.next();
+    }
+
+    // Lightweight Bot & Abuse Protection for APIs
+    if (pathname.startsWith("/api/")) {
+        const userAgent = (req.headers.get("user-agent") || "").toLowerCase();
+        if (!userAgent) {
+            return NextResponse.json({ error: "Forbidden - Missing User-Agent" }, { status: 403 });
+        }
+        const blockedScrapers = ["python-requests", "sqlmap", "nikto", "nmap", "curl/", "wget/", "postmanruntime"];
+        if (blockedScrapers.some(ua => userAgent.includes(ua))) {
+            // Allow OAuth callbacks and webhooks, block data extraction
+            if (!pathname.startsWith("/api/auth/")) {
+                return NextResponse.json({ error: "Forbidden - Automated tool detected" }, { status: 403 });
+            }
+        }
+    }
+
     if (isPublic) {
         return NextResponse.next();
     }

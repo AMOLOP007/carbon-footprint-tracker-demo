@@ -109,7 +109,7 @@ const ReportSchema = new Schema<IReport>(
         expiresAt: {
             type: Date,
             required: true,
-            index: true,
+            // TTL index defined separately below with expireAfterSeconds
         },
         downloadCount: {
             type: Number,

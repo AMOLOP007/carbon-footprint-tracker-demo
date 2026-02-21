@@ -2,43 +2,43 @@ import { NextResponse } from "next/server";
 import { connectToDB } from "@/lib/db";
 import Goal from "@/models/Goal";
 import Calculation from "@/models/Calculation";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth/options";
-import { cookies } from "next/headers";
-import { verifyJWT } from "@/lib/auth";
 import { logActivity } from "@/lib/utils/activity";
+import { getUserId } from "@/lib/auth/getUserId";
+import { rateLimiter } from "@/lib/security/rateLimiter";
+import { z } from "zod";
 
-// Get user ID helper
-async function getUserId() {
-    const session = await getServerSession(authOptions);
-    if (session?.user?.id) return session.user.id;
-    if (session?.user?.email) {
-        const User = (await import("@/models/User")).default;
-        const dbUser = await User.findOne({ email: session.user.email });
-        if (dbUser) return dbUser._id;
-    }
+const milestoneSchema = z.object({
+    title: z.string().max(100),
+    target: z.number().min(0).optional(),
+    completed: z.boolean().optional()
+});
 
-    const cookieStore = await cookies();
-    const token = cookieStore.get("token")?.value;
-    if (!token) return null;
+const goalSchema = z.object({
+    title: z.string().min(1).max(100),
+    description: z.string().max(500).optional(),
+    category: z.string().min(1).max(50),
+    target: z.number().min(0),
+    targetType: z.string().optional(),
+    baseline: z.number().min(0).optional(),
+    deadline: z.string().datetime().or(z.date()),
+    status: z.enum(["active", "completed", "overdue"]).optional(),
+    milestones: z.array(milestoneSchema).max(20).optional(),
+    current: z.number().min(0).optional()
+});
 
-    if (token.startsWith("mock-jwt-token") || token.startsWith("eyJhbGciOiJIUzI1NiJ9")) {
-        return "507f1f77bcf86cd799439011";
-    }
-
-    try {
-        const payload = await verifyJWT(token) as any;
-        return payload?.id;
-    } catch (e) {
-        return null;
-    }
-}
+const goalUpdateSchema = goalSchema.partial();
 
 /**
  * GET /api/goals - Get all goals for the current user
  */
 export async function GET(req: Request) {
     try {
+        const ip = req.headers.get("x-forwarded-for") ?? "unknown";
+        const rateLimit = await rateLimiter(ip, { windowMs: 60 * 1000, maxRequests: 60 });
+        if (!rateLimit.success) {
+            return NextResponse.json({ success: false, message: "Too many requests" }, { status: 429 });
+        }
+
         await connectToDB();
 
         const userId = await getUserId();
@@ -68,6 +68,12 @@ export async function GET(req: Request) {
  */
 export async function POST(req: Request) {
     try {
+        const ip = req.headers.get("x-forwarded-for") ?? "unknown";
+        const rateLimit = await rateLimiter(ip, { windowMs: 15 * 60 * 1000, maxRequests: 20 });
+        if (!rateLimit.success) {
+            return NextResponse.json({ success: false, message: "Too many requests" }, { status: 429 });
+        }
+
         await connectToDB();
 
         const userId = await getUserId();
@@ -76,14 +82,12 @@ export async function POST(req: Request) {
         }
 
         const body = await req.json();
-        const { title, description, category, target, targetType, baseline, deadline, milestones } = body;
-
-        // Validate required fields
-        if (!title || !category || !target || !deadline) {
-            return NextResponse.json({
-                error: "Missing required fields: title, category, target, deadline"
-            }, { status: 400 });
+        const validation = goalSchema.safeParse(body);
+        if (!validation.success) {
+            return NextResponse.json({ error: validation.error.errors[0].message }, { status: 400 });
         }
+
+        const { title, description, category, target, targetType, baseline, deadline, milestones } = validation.data;
 
         // Create goal
         const goal = await Goal.create({
@@ -136,6 +140,12 @@ export async function POST(req: Request) {
  */
 export async function PUT(req: Request) {
     try {
+        const ip = req.headers.get("x-forwarded-for") ?? "unknown";
+        const rateLimit = await rateLimiter(ip, { windowMs: 15 * 60 * 1000, maxRequests: 30 });
+        if (!rateLimit.success) {
+            return NextResponse.json({ success: false, message: "Too many requests" }, { status: 429 });
+        }
+
         await connectToDB();
 
         const userId = await getUserId();
@@ -144,7 +154,13 @@ export async function PUT(req: Request) {
         }
 
         const body = await req.json();
-        const { goalId, ...updates } = body;
+        const { goalId } = body;
+
+        const validation = goalUpdateSchema.safeParse(body);
+        if (!validation.success) {
+            return NextResponse.json({ error: validation.error.errors[0].message }, { status: 400 });
+        }
+        const { title, description, target, targetType, baseline, deadline, status, current } = validation.data;
 
         if (!goalId) {
             return NextResponse.json({ error: "Goal ID is required" }, { status: 400 });
@@ -156,8 +172,13 @@ export async function PUT(req: Request) {
             return NextResponse.json({ error: "Goal not found" }, { status: 404 });
         }
 
-        // Update fields
-        Object.assign(goal, updates);
+        // Safely update whitelisted fields
+        if (title !== undefined) goal.title = title;
+        if (description !== undefined) goal.description = description;
+        if (target !== undefined) goal.target = target;
+        if (current !== undefined) goal.current = current;
+        if (deadline !== undefined) goal.deadline = new Date(deadline);
+        if (status !== undefined && ["active", "completed", "overdue"].includes(status)) goal.status = status;
 
         // Auto-update status based on progress
         if (goal.current >= goal.target && goal.status === "active") {
@@ -175,7 +196,7 @@ export async function PUT(req: Request) {
             category: "goal",
             metadata: {
                 goalId: goal._id.toString(),
-                updates: Object.keys(updates),
+                updates: Object.keys(body).filter(k => k !== 'goalId'),
             },
         }).catch(err => console.error("Activity logging failed:", err));
 
@@ -191,6 +212,12 @@ export async function PUT(req: Request) {
  */
 export async function DELETE(req: Request) {
     try {
+        const ip = req.headers.get("x-forwarded-for") ?? "unknown";
+        const rateLimit = await rateLimiter(ip, { windowMs: 15 * 60 * 1000, maxRequests: 20 });
+        if (!rateLimit.success) {
+            return NextResponse.json({ success: false, message: "Too many requests" }, { status: 429 });
+        }
+
         await connectToDB();
 
         const userId = await getUserId();
