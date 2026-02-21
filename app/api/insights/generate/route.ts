@@ -20,10 +20,6 @@ async function getUserId() {
     const token = cookieStore.get("token")?.value;
     if (!token) return null;
 
-    if (token.startsWith("mock-jwt-token") || token.startsWith("eyJhbGciOiJIUzI1NiJ9")) {
-        return "507f1f77bcf86cd799439011";
-    }
-
     try {
         const payload = await verifyJWT(token) as any;
         return payload?.id;
@@ -32,8 +28,17 @@ async function getUserId() {
     }
 }
 
+import { rateLimiter } from "@/lib/security/rateLimiter";
+
 export async function POST(req: Request) {
     try {
+        // Rate limiting
+        const ip = req.headers.get("x-forwarded-for") ?? "unknown";
+        const rateLimit = rateLimiter(ip, { windowMs: 60 * 60 * 1000, maxRequests: 5 }); // strict limit for expensive AI operation
+        if (!rateLimit.success) {
+            return NextResponse.json({ message: "Too many requests. Try again later." }, { status: 429 });
+        }
+
         await connectToDB();
         const userId = await getUserId();
 
@@ -92,8 +97,8 @@ export async function POST(req: Request) {
         }
 
         return NextResponse.json({
-            error: error.message || "Failed to generate analysis",
-            details: error.toString()
+            success: false,
+            message: "Internal Server Error"
         }, { status: 500 });
     }
 }
@@ -120,8 +125,8 @@ export async function GET(req: Request) {
         }
 
         return NextResponse.json({
-            error: error.message || "Failed to generate analysis",
-            details: error.toString()
+            success: false,
+            message: "Internal Server Error"
         }, { status: 500 });
     }
 }

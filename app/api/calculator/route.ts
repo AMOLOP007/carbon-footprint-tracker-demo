@@ -6,7 +6,14 @@ import { cookies } from "next/headers";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth/options";
 import { cache } from "@/lib/db/cache";
+import { rateLimiter } from "@/lib/security/rateLimiter";
+import { z } from "zod";
 
+const calcSchema = z.object({
+    type: z.enum(["electricity", "vehicle", "shipping", "supply", "supply_chain"]),
+    inputs: z.record(z.any()),
+    emissions: z.number().min(0)
+});
 
 // Mock User ID getter if auth not fully wired
 async function getUserId() {
@@ -29,11 +36,6 @@ async function getUserId() {
 
     if (!token) return null;
 
-    // For demo/hardcoded user
-    if (token.startsWith("mock-jwt-token") || token.startsWith("eyJhbGciOiJIUzI1NiJ9")) {
-        return "507f1f77bcf86cd799439011";
-    }
-
     try {
         const payload = await verifyJWT(token) as any;
         return payload?.id;
@@ -44,6 +46,13 @@ async function getUserId() {
 
 export async function POST(req: Request) {
     try {
+        // Rate limiting
+        const ip = req.headers.get("x-forwarded-for") ?? "unknown";
+        const rateLimit = rateLimiter(ip, { windowMs: 60 * 1000, maxRequests: 20 });
+        if (!rateLimit.success) {
+            return NextResponse.json({ message: "Too many requests. Try again later." }, { status: 429 });
+        }
+
         // Ensure DB connection is established with proper await
         await connectToDB();
 
@@ -56,39 +65,12 @@ export async function POST(req: Request) {
         }
 
         const body = await req.json();
-        const { type, inputs, emissions } = body;
-
-        // Validate required fields
-        if (!type) {
-            console.error('[SAVE API] ✗ ERROR: Type missing');
-            return NextResponse.json({
-                error: "Calculation type is required."
-            }, { status: 400 });
+        const result = calcSchema.safeParse(body);
+        if (!result.success) {
+            return NextResponse.json({ error: "Invalid payload: " + result.error.errors[0].message }, { status: 400 });
         }
 
-        if (!inputs || typeof inputs !== 'object') {
-            console.error('[SAVE API] ✗ ERROR: Inputs missing or invalid:', inputs);
-            return NextResponse.json({
-                error: "Calculation inputs are required."
-            }, { status: 400 });
-        }
-
-        if (typeof emissions !== 'number' || emissions < 0) {
-            console.error('[SAVE API] ✗ ERROR: Invalid emissions value:', emissions, 'Type:', typeof emissions);
-            return NextResponse.json({
-                error: "Valid emissions value is required."
-            }, { status: 400 });
-        }
-        console.log('[SAVE API] ✓ All validations passed');
-
-        // Validate type enum against Calculation model - ACCEPT BOTH supply and supply_chain
-        const validTypes = ["electricity", "vehicle", "shipping", "supply", "supply_chain"];
-        if (!validTypes.includes(type)) {
-            console.error('[SAVE ERROR] Invalid type:', type, 'Valid types:', validTypes);
-            return NextResponse.json({
-                error: `Invalid calculation type "${type}". Must be one of: ${validTypes.join(", ")}.`
-            }, { status: 400 });
-        }
+        const { type, inputs, emissions } = result.data;
 
         // Normalize 'supply' to 'supply_chain' for database consistency
         const normalizedType = type === 'supply' ? 'supply_chain' : type;
@@ -128,38 +110,8 @@ export async function POST(req: Request) {
             { status: 201 }
         );
     } catch (error: any) {
-        console.error("==========================================");
-        console.error("[SAVE API] ❌ CRITICAL ERROR CAUGHT");
-        console.error("Error name:", error.name);
-        console.error("Error message:", error.message);
-        console.error("Error code:", error.code);
-        console.error("Error stack:", error.stack);
-        console.error("Full error object:", JSON.stringify(error, null, 2));
-        console.error("==========================================");
-
-        // Handle Mongoose validation errors
-        if (error.name === 'ValidationError') {
-            const messages = Object.values(error.errors).map((err: any) => err.message);
-            console.error('[SAVE API] Validation errors:', messages);
-            return NextResponse.json({
-                error: `Validation error: ${messages.join(', ')}`
-            }, { status: 400 });
-        }
-
-        // Handle duplicate key errors
-        if (error.code === 11000) {
-            console.error('[SAVE API] Duplicate key error');
-            return NextResponse.json({
-                error: "This calculation already exists."
-            }, { status: 409 });
-        }
-
-        // Return detailed error for debugging
-        return NextResponse.json({
-            error: "Failed to save calculation. Please try again.",
-            details: error.message,
-            errorType: error.name
-        }, { status: 500 });
+        console.error("[SAVE API] ❌ CRITICAL ERROR CAUGHT", error.message || error);
+        return NextResponse.json({ success: false, message: "Internal Server Error" }, { status: 500 });
     }
 }
 

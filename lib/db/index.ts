@@ -32,39 +32,24 @@ export const connectToDB = async (retries = 3, delay = 1000): Promise<typeof mon
     }
 
     if (!MONGODB_URI) {
-        // Fallback for local development if env var is missing
-        const fallbackURI = "mongodb://127.0.0.1:27017/aetherra";
-        console.warn(`MONGODB_URI not found. Using local fallback: ${fallbackURI}`);
+        throw new Error("Please define the MONGODB_URI environment variable inside .env.local");
+    }
 
-        if (!cached.promise) {
-            const opts = {
-                bufferCommands: false,
-                serverSelectionTimeoutMS: 5000,
-                socketTimeoutMS: 45000,
-            };
-            cached.promise = mongoose.connect(fallbackURI, opts).then((mongoose) => {
-                console.log("✅ MongoDB connected (fallback)");
-                return mongoose;
-            });
-        }
-    } else {
-        if (!cached.promise) {
-            const opts = {
-                bufferCommands: false,
-                serverSelectionTimeoutMS: 5000,
-                socketTimeoutMS: 45000,
-                family: 4,
-            };
+    if (!cached.promise) {
+        const opts = {
+            bufferCommands: false,
+            serverSelectionTimeoutMS: 5000,
+            socketTimeoutMS: 45000,
+            family: 4,
+        };
 
-            // Log the URI being used (masking password)
-            const maskedURI = MONGODB_URI.replace(/:([^:@]+)@/, ':****@');
-            console.log(`[DB] Attempting connection to: ${maskedURI}`);
+        const maskedURI = MONGODB_URI.replace(/:([^:@]+)@/, ':****@');
+        console.log(`[DB] Attempting connection to: ${maskedURI}`);
 
-            cached.promise = mongoose.connect(MONGODB_URI, opts).then((mongoose) => {
-                console.log("✅ MongoDB connected");
-                return mongoose;
-            });
-        }
+        cached.promise = mongoose.connect(MONGODB_URI, opts).then((mongoose) => {
+            console.log("✅ MongoDB connected");
+            return mongoose;
+        });
     }
 
     try {
